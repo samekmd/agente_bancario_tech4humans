@@ -5,10 +5,11 @@ carrega essa decisão pronta; ao LLM cabe só formular a pergunta e extrair o va
 """
 
 from langchain_core.language_models import BaseChatModel
+from langgraph.graph.state import CompiledStateGraph
 
 from banco_agil.agents.base import construir_agente
 from banco_agil.domain.enums import Agente
-from banco_agil.services.entrevista import CAMPOS, PERGUNTAS, proximo_campo
+from banco_agil.services.entrevista import CAMPOS, OPCOES, PERGUNTAS, proximo_campo
 from banco_agil.state import AtendimentoState
 
 
@@ -31,13 +32,23 @@ def contexto(state: AtendimentoState) -> str:
         )
 
     posicao = CAMPOS.index(campo) + 1
-    return (
-        f"{ja_feitas}\n"
-        f"PERGUNTA ATUAL ({posicao} de {len(CAMPOS)}): {PERGUNTAS[campo]}.\n"
-        f"Ao registrar a resposta, use o campo `{campo}`."
-    )
+    linhas = [
+        ja_feitas,
+        f"PERGUNTA ATUAL ({posicao} de {len(CAMPOS)}): {PERGUNTAS[campo]}.",
+    ]
+
+    opcoes = OPCOES.get(campo)
+    if opcoes:
+        lista = ", ".join(opcoes[:-1]) + f" ou {opcoes[-1]}"
+        linhas.append(
+            f"RESPOSTAS ACEITAS: {lista}. Ofereça as {len(opcoes)} opções na própria "
+            "pergunta e deixe claro que o cliente precisa escolher uma delas."
+        )
+
+    linhas.append(f"Ao registrar a resposta, use o campo `{campo}`.")
+    return "\n".join(linhas)
 
 
-def construir(llm: BaseChatModel | None = None) -> object:
+def construir(llm: BaseChatModel | None = None) -> CompiledStateGraph:
     """Monta o agente de Entrevista de Crédito."""
     return construir_agente(Agente.ENTREVISTA_CREDITO, contexto=contexto, llm=llm)

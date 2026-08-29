@@ -6,6 +6,7 @@ from banco_agil.domain.enums import TipoEmprego
 from banco_agil.repositories.clientes import ClientesRepository
 from banco_agil.services.entrevista import (
     CAMPOS,
+    OPCOES,
     concluir_entrevista,
     montar_dados,
     normalizar_valor,
@@ -62,12 +63,35 @@ class TestNormalizarValor:
         [
             ("formal", TipoEmprego.FORMAL),
             ("Formal", TipoEmprego.FORMAL),
+            ("FORMAL", TipoEmprego.FORMAL),
             ("autônomo", TipoEmprego.AUTONOMO),
+            ("Autônomo", TipoEmprego.AUTONOMO),
+            ("AUTÔNOMO", TipoEmprego.AUTONOMO),
+            ("autonomo", TipoEmprego.AUTONOMO),
             ("autonoma", TipoEmprego.AUTONOMO),
+            ("desempregado", TipoEmprego.DESEMPREGADO),
             ("Desempregado", TipoEmprego.DESEMPREGADO),
+            ("Desempregada", TipoEmprego.DESEMPREGADO),
+            ("  desempregado  ", TipoEmprego.DESEMPREGADO),
         ],
     )
-    def test_tipo_de_emprego_com_e_sem_acento(self, valor: str, esperado: TipoEmprego) -> None:
+    def test_tipo_de_emprego_ignora_acento_caixa_e_espaco(
+        self, valor: str, esperado: TipoEmprego
+    ) -> None:
+        assert normalizar_valor("tipo_emprego", valor) is esperado
+
+    @pytest.mark.parametrize(
+        ("valor", "esperado"),
+        [
+            ("Autônomo.", TipoEmprego.AUTONOMO),
+            ("formal!", TipoEmprego.FORMAL),
+            ('"desempregado"', TipoEmprego.DESEMPREGADO),
+            ("Formal,", TipoEmprego.FORMAL),
+        ],
+    )
+    def test_tipo_de_emprego_ignora_pontuacao_de_borda(
+        self, valor: str, esperado: TipoEmprego
+    ) -> None:
         assert normalizar_valor("tipo_emprego", valor) is esperado
 
     @pytest.mark.parametrize(("valor", "esperado"), [("sim", True), ("não", False), ("nao", False)])
@@ -82,6 +106,8 @@ class TestNormalizarValor:
         ("campo", "valor"),
         [
             ("tipo_emprego", "empresário"),
+            ("tipo_emprego", "carteira assinada"),
+            ("tipo_emprego", "clt"),
             ("num_dependentes", "vários"),
             ("num_dependentes", "-1"),
             ("tem_dividas", "talvez"),
@@ -90,8 +116,29 @@ class TestNormalizarValor:
         ],
     )
     def test_rejeita_valor_ou_campo_invalido(self, campo: str, valor: str) -> None:
+        """Fora das opções continua recusado: quem restringe é a pergunta, não o normalizador."""
         with pytest.raises(EntradaInvalidaError):
             normalizar_valor(campo, valor)
+
+
+class TestOpcoesOferecidas:
+    """As opções apresentadas ao cliente não podem divergir do que o normalizador aceita."""
+
+    def test_toda_opcao_de_vinculo_e_aceita(self) -> None:
+        for opcao in OPCOES["tipo_emprego"]:
+            assert isinstance(normalizar_valor("tipo_emprego", opcao), TipoEmprego)
+
+    def test_toda_opcao_de_dividas_e_aceita(self) -> None:
+        for opcao in OPCOES["tem_dividas"]:
+            assert isinstance(normalizar_valor("tem_dividas", opcao), bool)
+
+    def test_as_opcoes_cobrem_todos_os_vinculos_possiveis(self) -> None:
+        aceitos = {normalizar_valor("tipo_emprego", o) for o in OPCOES["tipo_emprego"]}
+
+        assert aceitos == set(TipoEmprego)
+
+    def test_so_campos_de_resposta_fechada_tem_opcoes(self) -> None:
+        assert set(OPCOES) <= set(CAMPOS)
 
 
 class TestRegistrarSlot:

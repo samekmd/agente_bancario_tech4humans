@@ -23,8 +23,8 @@ class Settings(BaseSettings):
 
     # Provedor de LLM
     groq_api_key: SecretStr
-    modelo_dialogo: str = "llama-3.3-70b-versatile"
-    modelo_extracao: str = "llama-3.3-70b-versatile"
+    modelo_dialogo: str = "openai/gpt-oss-120b"
+    modelo_extracao: str = "openai/gpt-oss-120b"
     temperatura_dialogo: float = 0.3
     temperatura_extracao: float = 0.0
 

@@ -11,6 +11,7 @@ from functools import cache
 from langchain.agents import create_agent
 from langchain.agents.middleware import dynamic_prompt
 from langchain_core.language_models import BaseChatModel
+from langgraph.graph.state import CompiledStateGraph
 
 from banco_agil.config import get_settings
 from banco_agil.domain.enums import Agente
@@ -46,7 +47,7 @@ def construir_agente(
     agente: Agente,
     contexto: Contexto | None = None,
     llm: BaseChatModel | None = None,
-) -> object:
+) -> CompiledStateGraph:
     """Monta o subgrafo de um agente com suas tools e o prompt do seu domínio.
 
     `contexto` recebe o estado e devolve os fatos que o LLM não deve inferir — o campo que

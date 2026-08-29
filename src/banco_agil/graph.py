@@ -4,12 +4,15 @@ Um nó por agente, nomeado com o valor do enum `Agente` — as handoff tools esc
 mesmo valor em `agente_atual`, e é assim que a aresta condicional encontra o destino.
 """
 
+from pathlib import Path
+
 from langchain_core.language_models import BaseChatModel
 from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 from langgraph.graph import END, START, StateGraph
+from langgraph.graph.state import CompiledStateGraph
 
 from banco_agil.agents import cambio, credito, entrevista, triagem
 from banco_agil.config import get_settings
@@ -43,7 +46,7 @@ def criar_checkpointer() -> BaseCheckpointSaver:
 def build_graph(
     llm: BaseChatModel | None = None,
     checkpointer: BaseCheckpointSaver | None = None,
-) -> object:
+) -> CompiledStateGraph:
     """Monta e compila o grafo do atendimento.
 
     `llm` permite injetar um modelo falso nos testes; em produção cada agente resolve o
@@ -76,3 +79,11 @@ def config_execucao(thread_id: str) -> RunnableConfig:
         "configurable": {"thread_id": thread_id},
         "recursion_limit": get_settings().recursion_limit,
     }
+
+
+def exportar_grafo(destino: Path | None = None) -> Path:
+    """Desenha o grafo compilado em PNG. Usado por `make grafo`."""
+    caminho = destino or get_settings().base_dir / "docs" / "grafo.png"
+    caminho.parent.mkdir(parents=True, exist_ok=True)
+    caminho.write_bytes(build_graph().get_graph().draw_mermaid_png())
+    return caminho

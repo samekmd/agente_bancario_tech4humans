@@ -30,10 +30,19 @@ CAMPOS: tuple[str, ...] = (
 PERGUNTAS: dict[str, str] = {
     "renda_mensal": "qual é a renda mensal do cliente",
     "despesas_mensais": "qual é o total de despesas mensais do cliente",
-    "tipo_emprego": "qual é o vínculo de trabalho (formal, autônomo ou desempregado)",
+    "tipo_emprego": "qual das três opções descreve o vínculo de trabalho do cliente",
     "num_dependentes": "quantos dependentes o cliente tem",
     "tem_dividas": "se o cliente tem dívidas em aberto",
 }
+
+# Campos de resposta fechada. A lista mora aqui, ao lado de quem valida, para que a
+# pergunta feita ao cliente não possa divergir do que o normalizador aceita.
+OPCOES: dict[str, tuple[str, ...]] = {
+    "tipo_emprego": ("formal", "autônomo", "desempregado"),
+    "tem_dividas": ("sim", "não"),
+}
+
+_PONTUACAO_DE_BORDA = ".,;:!?'\"()[]"
 
 _AFIRMATIVOS = {"sim", "s", "true", "verdadeiro", "tenho", "possuo", "1"}
 _NEGATIVOS = {"nao", "n", "false", "falso", "nenhuma", "nenhum", "0"}
@@ -47,9 +56,11 @@ _EMPREGOS: dict[str, TipoEmprego] = {
 }
 
 
-def _sem_acento(texto: str) -> str:
-    normalizado = unicodedata.normalize("NFKD", texto or "")
-    return "".join(c for c in normalizado if not unicodedata.combining(c)).strip().lower()
+def _normalizar_texto(texto: str) -> str:
+    """Tira acento, caixa, espaços e pontuação de borda: `"Autônomo."` vira `autonomo`."""
+    decomposto = unicodedata.normalize("NFKD", texto or "")
+    sem_acento = "".join(c for c in decomposto if not unicodedata.combining(c))
+    return sem_acento.strip().strip(_PONTUACAO_DE_BORDA).strip().lower()
 
 
 def proximo_campo(slots: Slots) -> str | None:
@@ -79,7 +90,7 @@ def normalizar_valor(campo: str, valor: ValorBruto) -> ValorSlot:
     if campo == "tipo_emprego":
         if isinstance(valor, TipoEmprego):
             return valor
-        emprego = _EMPREGOS.get(_sem_acento(str(valor)))
+        emprego = _EMPREGOS.get(_normalizar_texto(str(valor)))
         if emprego is None:
             raise EntradaInvalidaError("Vínculo inválido. Use formal, autônomo ou desempregado.")
         return emprego
@@ -95,7 +106,7 @@ def normalizar_valor(campo: str, valor: ValorBruto) -> ValorSlot:
 
     if isinstance(valor, bool):
         return valor
-    texto = _sem_acento(str(valor))
+    texto = _normalizar_texto(str(valor))
     if texto in _AFIRMATIVOS:
         return True
     if texto in _NEGATIVOS:

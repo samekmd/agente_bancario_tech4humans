@@ -1,6 +1,7 @@
 """Agente de Triagem: acolhe o cliente, autentica e encaminha."""
 
 from langchain_core.language_models import BaseChatModel
+from langgraph.graph.state import CompiledStateGraph
 
 from banco_agil.agents.base import construir_agente
 from banco_agil.config import get_settings
@@ -25,6 +26,6 @@ def contexto(state: AtendimentoState) -> str:
     )
 
 
-def construir(llm: BaseChatModel | None = None) -> object:
+def construir(llm: BaseChatModel | None = None) -> CompiledStateGraph:
     """Monta o agente de Triagem."""
     return construir_agente(Agente.TRIAGEM, contexto=contexto, llm=llm)
