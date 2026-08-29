@@ -1,0 +1,20 @@
+# Segredos
+.env
+
+# Dados gerados em runtime
+data/solicitacoes_aumento_limite.csv
+data/*.lock
+logs/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+build/
+dist/
+*.egg-info/
+
+# Ferramentas
+.pytest_cache/
+.ruff_cache/
+.streamlit/secrets.toml
