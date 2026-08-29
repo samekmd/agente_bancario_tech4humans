@@ -49,10 +49,16 @@ exigir violar alguma delas, pare e sinalize em vez de contornar.
    entrada inválida) viram retorno estruturado com `ok: False` e uma mensagem que o
    agente possa verbalizar. Exceções de domínio ficam em `utils/exceptions.py`.
 
-7. **Handoff não encerra o turno.** Transferências entre agentes usam
-   `Command(goto=..., graph=Command.PARENT)` e o grafo continua executando. O agente que
-   recebe o controle responde na mesma mensagem, sem se reapresentar e sem anunciar a
-   transição. Do ponto de vista do cliente existe um único atendente.
+7. **Handoff não encerra o turno.** A handoff tool escreve `agente_atual` e encerra o
+   subgrafo do agente de origem (`return_direct=True`, para ele não voltar ao LLM e
+   anunciar a saída); a aresta condicional do grafo pai lê o campo e entrega o controle ao
+   destino, que responde na mesma invocação. O agente que recebe o controle responde na
+   mesma mensagem, sem se reapresentar e sem anunciar a transição. Do ponto de vista do
+   cliente existe um único atendente.
+
+   Não usar `Command(goto=..., graph=Command.PARENT)`: saindo de um subgrafo, a
+   `AIMessage` que fez o tool call não chega ao grafo pai, o histórico persistido fica com
+   uma `ToolMessage` órfã e o provedor de LLM rejeita a próxima mensagem.
 
 8. **Escrita em CSV é atômica.** Sempre via `repositories/base.py`: escreve em arquivo
    temporário e faz `os.replace`, sob `filelock`. Nunca abrir CSV com `open(..., "w")`

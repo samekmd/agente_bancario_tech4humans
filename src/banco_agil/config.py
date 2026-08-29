@@ -42,15 +42,14 @@ class Settings(BaseSettings):
     # Observabilidade
     log_level: str = "INFO"
 
+    # Dados. Campo, e não property, para que testes e outros ambientes possam apontar as
+    # bases para outro diretório sem tocar em código.
+    data_dir: Path = BASE_DIR / "data"
+
     @property
     def base_dir(self) -> Path:
         """Raiz do repositório."""
         return BASE_DIR
-
-    @property
-    def data_dir(self) -> Path:
-        """Diretório das bases mutáveis em runtime."""
-        return BASE_DIR / "data"
 
     @property
     def seed_dir(self) -> Path:

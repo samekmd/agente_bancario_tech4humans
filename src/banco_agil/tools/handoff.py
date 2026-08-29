@@ -1,8 +1,14 @@
 """Tools de handoff entre agentes, que escrevem `agente_atual` no estado.
 
-O handoff não encerra o turno: o `Command` salta para o nó do agente de destino no grafo
-pai e a execução continua, de modo que quem recebe o controle responde na mesma mensagem.
-O nome de cada nó do grafo é o valor do enum `Agente`.
+O handoff não encerra o turno. A tool escreve `agente_atual` e encerra o subgrafo do
+agente de origem (`return_direct=True`, para ele não voltar ao LLM e anunciar a
+transferência); a aresta condicional do grafo pai lê o campo e entrega o controle ao
+agente de destino, que responde na mesma invocação. O nome de cada nó do grafo é o valor
+do enum `Agente`.
+
+`Command(goto=..., graph=Command.PARENT)` foi descartado: saindo de um subgrafo, a
+`AIMessage` que fez o tool call não chega ao grafo pai e o histórico fica com uma
+`ToolMessage` órfã, que o provedor de LLM rejeita na mensagem seguinte.
 """
 
 from typing import Annotated
@@ -17,10 +23,10 @@ from banco_agil.tools.base import responder, sucesso
 def _transferir(destino: Agente, tool_call_id: str) -> Command:
     """Move o controle para outro agente, sem interromper a execução do grafo."""
     payload = sucesso(agente_atual=destino, mensagem="Controle transferido.")
-    return responder(payload, tool_call_id, goto=destino.value, agente_atual=destino)
+    return responder(payload, tool_call_id, agente_atual=destino)
 
 
-@tool
+@tool(return_direct=True)
 def transferir_para_credito(tool_call_id: Annotated[str, InjectedToolCallId]) -> Command:
     """Passa o atendimento para a especialidade de crédito.
 
@@ -31,7 +37,7 @@ def transferir_para_credito(tool_call_id: Annotated[str, InjectedToolCallId]) ->
     return _transferir(Agente.CREDITO, tool_call_id)
 
 
-@tool
+@tool(return_direct=True)
 def transferir_para_entrevista_credito(
     tool_call_id: Annotated[str, InjectedToolCallId],
 ) -> Command:
@@ -43,7 +49,7 @@ def transferir_para_entrevista_credito(
     return _transferir(Agente.ENTREVISTA_CREDITO, tool_call_id)
 
 
-@tool
+@tool(return_direct=True)
 def transferir_para_cambio(tool_call_id: Annotated[str, InjectedToolCallId]) -> Command:
     """Passa o atendimento para a especialidade de câmbio.
 
@@ -53,7 +59,7 @@ def transferir_para_cambio(tool_call_id: Annotated[str, InjectedToolCallId]) -> 
     return _transferir(Agente.CAMBIO, tool_call_id)
 
 
-@tool
+@tool(return_direct=True)
 def transferir_para_triagem(tool_call_id: Annotated[str, InjectedToolCallId]) -> Command:
     """Devolve o atendimento para a triagem.
 

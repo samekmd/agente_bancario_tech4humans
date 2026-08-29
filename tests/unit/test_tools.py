@@ -407,22 +407,33 @@ class TestHandoff:
             (transferir_para_triagem, Agente.TRIAGEM),
         ],
     )
-    def test_salta_para_o_no_do_agente_no_grafo_pai(self, ferramenta, destino: Agente) -> None:
+    def test_escreve_o_agente_de_destino_no_estado(self, ferramenta, destino: Agente) -> None:
         comando = chamar(ferramenta)
 
-        assert comando.goto == destino.value
-        assert comando.graph == Command.PARENT
         assert comando.update["agente_atual"] is destino
+        # Quem roteia é a aresta condicional, lendo `agente_atual`: a tool não salta de nó.
+        assert not comando.goto
+
+    def test_handoff_encerra_o_subgrafo_de_origem(self) -> None:
+        """`return_direct` impede o agente de origem de voltar ao LLM e anunciar a saída."""
+        for ferramenta in (
+            transferir_para_credito,
+            transferir_para_entrevista_credito,
+            transferir_para_cambio,
+            transferir_para_triagem,
+        ):
+            assert ferramenta.return_direct is True
 
     def test_handoff_nao_encerra_o_atendimento(self) -> None:
         comando = chamar(transferir_para_credito)
 
         assert comando.update.get("encerrado") is None
-        assert comando.goto
 
-    def test_nome_do_no_e_o_valor_do_enum(self) -> None:
-        """O grafo da Fase 4 precisa nomear os nós exatamente assim."""
-        assert chamar(transferir_para_entrevista_credito).goto == "entrevista_credito"
+    def test_destino_corresponde_ao_nome_do_no_do_grafo(self) -> None:
+        """O grafo nomeia os nós pelo valor do enum; o handoff precisa bater com isso."""
+        assert chamar(transferir_para_entrevista_credito).update["agente_atual"].value == (
+            "entrevista_credito"
+        )
 
 
 class TestSistema:
