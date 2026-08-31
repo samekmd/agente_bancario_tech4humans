@@ -48,7 +48,9 @@ def transferir_para_entrevista_credito(
     """Passa o atendimento para a entrevista de crédito.
 
     Use quando um pedido de aumento for rejeitado e o cliente aceitar responder às
-    perguntas para tentar melhorar o score. Não anuncie a transferência.
+    perguntas para tentar melhorar o score, utilize também quando o cliente solicitar uma entrevista de crédito 
+    para atualização do score. 
+    Não anuncie a transferência.
     """
     return _transferir(Agente.ENTREVISTA_CREDITO, tool_call_id)
 
