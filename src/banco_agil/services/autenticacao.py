@@ -6,6 +6,7 @@ pelo LLM nem inferida do número de mensagens.
 
 from banco_agil.domain.enums import MotivoFalhaAuth
 from banco_agil.domain.models import ResultadoAutenticacao
+from banco_agil.observability.tracing import TASK, span
 from banco_agil.repositories.clientes import ClientesRepository
 from banco_agil.utils.exceptions import EntradaInvalidaError
 from banco_agil.utils.validators import validar_cpf, validar_data_nascimento
@@ -53,7 +54,10 @@ def autenticar(
     except EntradaInvalidaError:
         return _falha(MotivoFalhaAuth.DATA_INVALIDA, tentativas, max_tentativas)
 
-    cliente = (repo or ClientesRepository()).buscar_por_cpf(cpf_normalizado)
+    # O span registra o desfecho, nunca as credenciais: CPF e data juntos são a chave.
+    with span("autenticar", TASK, tentativas_atuais=tentativas_atuais) as observado:
+        cliente = (repo or ClientesRepository()).buscar_por_cpf(cpf_normalizado)
+        observado.set_outputs({"encontrado": cliente is not None})
     if cliente is None or cliente.data_nascimento != nascimento:
         return _falha(MotivoFalhaAuth.CREDENCIAIS_INCORRETAS, tentativas, max_tentativas)
 

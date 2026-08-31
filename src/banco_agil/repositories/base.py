@@ -14,6 +14,7 @@ from typing import Any
 
 from filelock import FileLock
 
+from banco_agil.observability.tracing import TOOL, span
 from banco_agil.utils.exceptions import DadosIndisponiveisError
 
 TIMEOUT_LOCK_S = 10.0
@@ -83,8 +84,10 @@ def ler_csv(caminho: Path) -> list[dict[str, str]]:
     """
     if not caminho.exists():
         raise DadosIndisponiveisError(f"Base de dados indisponível: {caminho.name}.")
-    with _lock(caminho):
-        return _ler(caminho)
+    with span("ler_csv", TOOL, arquivo=caminho.name) as observado, _lock(caminho):
+        linhas = _ler(caminho)
+        observado.set_outputs({"linhas": len(linhas)})
+        return linhas
 
 
 def escrever_csv(
@@ -93,8 +96,12 @@ def escrever_csv(
     linhas: Iterable[Mapping[str, Any]],
 ) -> None:
     """Reescreve o CSV inteiro de forma atômica, sob lock."""
-    with _lock(caminho):
-        _escrever(caminho, colunas, linhas)
+    materializadas = list(linhas)
+    with (
+        span("escrever_csv", TOOL, arquivo=caminho.name, linhas=len(materializadas)),
+        _lock(caminho),
+    ):
+        _escrever(caminho, colunas, materializadas)
 
 
 def anexar_linha(caminho: Path, colunas: Sequence[str], linha: Mapping[str, Any]) -> None:

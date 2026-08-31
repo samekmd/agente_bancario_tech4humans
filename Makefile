@@ -1,4 +1,4 @@
-.PHONY: install run test lint format reset-data grafo
+.PHONY: install run test lint format reset-data grafo mlflow
 
 install:
 	uv sync --all-extras
@@ -26,3 +26,8 @@ reset-data:
 grafo:
 	GROQ_API_KEY=$${GROQ_API_KEY:-placeholder} \
 		uv run python -c "from banco_agil.graph import exportar_grafo; print(exportar_grafo())"
+
+# Sobe o servidor do MLflow. Os traces só aparecem no UI com ele de pé; sem ele a
+# aplicação funciona igual, apenas sem observabilidade.
+mlflow:
+	uv run mlflow server --host 127.0.0.1 --port 5000

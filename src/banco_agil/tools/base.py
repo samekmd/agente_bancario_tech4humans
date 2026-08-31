@@ -11,6 +11,7 @@ from typing import Any
 from langchain_core.messages import ToolMessage
 from langgraph.types import Command
 
+from banco_agil.observability.tags import marcar_erro
 from banco_agil.utils.exceptions import BancoAgilError
 from banco_agil.utils.logging import get_logger
 
@@ -38,8 +39,10 @@ def falha_de(excecao: Exception, tool: str = "?") -> dict[str, Any]:
     """
     if isinstance(excecao, BancoAgilError):
         logger.warning("[%s] erro de domínio: %s", tool, excecao.mensagem)
+        marcar_erro(excecao.mensagem, tool)
         return falha(excecao.mensagem)
     logger.exception("[%s] erro inesperado", tool)
+    marcar_erro(f"{type(excecao).__name__}: {excecao}", tool)
     return falha(ERRO_INESPERADO)
 
 

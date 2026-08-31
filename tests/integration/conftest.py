@@ -51,6 +51,8 @@ def bases_isoladas(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[
 
     monkeypatch.setenv("DATA_DIR", str(destino))
     monkeypatch.setenv("GROQ_API_KEY", "chave-de-teste")
+    # A suíte roda offline: sem isso o app tentaria alcançar o servidor do MLflow.
+    monkeypatch.setenv("MLFLOW_HABILITADO", "false")
     get_settings.cache_clear()
     yield destino
     get_settings.cache_clear()

@@ -6,6 +6,7 @@ from langchain_core.tools import InjectedToolCallId, tool
 from langgraph.prebuilt import InjectedState
 from langgraph.types import Command
 
+from banco_agil.observability.tags import marcar, marcar_cliente
 from banco_agil.services.autenticacao import autenticar
 from banco_agil.state import AtendimentoState
 from banco_agil.tools.base import falha, falha_de, responder, sucesso
@@ -49,6 +50,7 @@ def autenticar_cliente(
             resultado.tentativas_restantes,
             resultado.bloqueado,
         )
+        marcar(autenticado=False, motivo_falha_auth=resultado.motivo)
         payload = falha(
             "Os dados não conferem com a nossa base.",
             tentativas_restantes=resultado.tentativas_restantes,
@@ -64,6 +66,8 @@ def autenticar_cliente(
 
     cliente = resultado.cliente
     logger.info("<- autenticar_cliente: autenticado cpf=%s", mascarar_cpf(cliente.cpf))
+    marcar_cliente(cliente.cpf)
+    marcar(autenticado=True)
     payload = sucesso(
         nome=cliente.nome,
         primeiro_nome=cliente.nome.split()[0],

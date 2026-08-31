@@ -14,6 +14,11 @@ build/
 dist/
 *.egg-info/
 
+# Observabilidade (MLflow local)
+mlruns/
+mlflow.db
+mlartifacts
+
 # Ferramentas
 .pytest_cache/
 .ruff_cache/

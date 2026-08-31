@@ -85,6 +85,7 @@ src/banco_agil/
   services/                     autenticacao, score, limite, cotacao  (puro, sem I/O)
   repositories/                 base, clientes, score_limite, solicitacoes
   domain/                       models.py, enums.py
+  observability/                setup (MLflow), tracing (spans), tags
   utils/                        validators, logging, exceptions
 ui/                             chat.py, session.py
 tests/                          unit/, integration/, fixtures/
@@ -202,6 +203,11 @@ cliente com clareza e registrar o erro — nunca inventar valor.
 - Config e segredos só via `config.py`. Nenhuma chave hardcoded, nenhum `os.getenv`
   espalhado.
 - Logging estruturado via `utils/logging.py`. Sem `print`.
+- `observability/` e `utils/` são camadas transversais: qualquer camada pode importá-las,
+  e elas não importam nenhuma. Observar nunca altera o atendimento — com o MLflow
+  desligado ou fora do ar, span e tag viram no-op silencioso.
+- Nem CPF nem data de nascimento entram em log ou trace. CPF vai mascarado por
+  `mascarar_cpf`; a data, junto do CPF, é credencial e não é registrada.
 - Temperatura 0 para extração e classificação; baixa (0.3) para diálogo.
 
 ## Testes

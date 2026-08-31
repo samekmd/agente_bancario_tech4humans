@@ -8,6 +8,7 @@ from datetime import datetime
 
 from banco_agil.domain.enums import StatusPedido
 from banco_agil.domain.models import Cliente, FaixaLimite, ResultadoAvaliacao, SolicitacaoAumento
+from banco_agil.observability.tracing import TASK, span
 from banco_agil.repositories.score_limite import ScoreLimiteRepository
 from banco_agil.repositories.solicitacoes import SolicitacoesRepository
 from banco_agil.utils.exceptions import DadosIndisponiveisError
@@ -67,6 +68,16 @@ def avaliar_aumento(
     if faixas is None:
         faixas = (repo or ScoreLimiteRepository()).listar_faixas()
 
+    with span("avaliar_aumento", TASK, score=score, limite_solicitado=limite_solicitado) as obs:
+        return _avaliar(score, limite_solicitado, faixas, obs)
+
+
+def _avaliar(
+    score: int,
+    limite_solicitado: float,
+    faixas: Sequence[FaixaLimite],
+    observado: object,
+) -> ResultadoAvaliacao:
     maximo = limite_maximo_permitido(score, faixas)
     aprovado = limite_solicitado <= maximo
     resultado = ResultadoAvaliacao(
@@ -84,6 +95,7 @@ def avaliar_aumento(
         resultado.status_pedido.value,
         resultado.model_dump(mode="json"),
     )
+    observado.set_outputs(resultado.model_dump(mode="json"))
     return resultado
 
 

@@ -17,6 +17,7 @@ from langchain_core.tools import InjectedToolCallId, tool
 from langgraph.types import Command
 
 from banco_agil.domain.enums import Agente
+from banco_agil.observability.tags import marcar_agente
 from banco_agil.tools.base import responder, sucesso
 from banco_agil.utils.logging import get_logger
 
@@ -26,6 +27,7 @@ logger = get_logger("tools.handoff")
 def _transferir(destino: Agente, tool_call_id: str) -> Command:
     """Move o controle para outro agente, sem interromper a execução do grafo."""
     logger.info("handoff pedido para: %s", destino.value)
+    marcar_agente(destino)
     payload = sucesso(agente_atual=destino, mensagem="Controle transferido.")
     return responder(payload, tool_call_id, agente_atual=destino)
 
@@ -48,8 +50,8 @@ def transferir_para_entrevista_credito(
     """Passa o atendimento para a entrevista de crédito.
 
     Use quando um pedido de aumento for rejeitado e o cliente aceitar responder às
-    perguntas para tentar melhorar o score, utilize também quando o cliente solicitar uma entrevista de crédito 
-    para atualização do score. 
+    perguntas para tentar melhorar o score; utilize também quando o cliente solicitar
+    uma entrevista de crédito para atualização do score.
     Não anuncie a transferência.
     """
     return _transferir(Agente.ENTREVISTA_CREDITO, tool_call_id)

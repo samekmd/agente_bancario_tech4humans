@@ -6,6 +6,7 @@ entrevista; quem transforma isso em número é este módulo.
 
 from banco_agil.domain.enums import TipoEmprego
 from banco_agil.domain.models import DadosEntrevista
+from banco_agil.observability.tracing import TASK, span
 from banco_agil.utils.logging import get_logger
 from banco_agil.utils.validators import arredondar
 
@@ -45,6 +46,11 @@ def calcular_score(dados: DadosEntrevista) -> int:
     `score = (renda / (despesas + 1)) * 30 + peso_emprego + peso_dependentes + peso_dividas`,
     arredondado para inteiro e truncado ao intervalo 0–1000.
     """
+    with span("calcular_score", TASK, **dados.model_dump(mode="json")) as observado:
+        return _calcular(dados, observado)
+
+
+def _calcular(dados: DadosEntrevista, observado: object) -> int:
     parcela_renda = (dados.renda_mensal / (dados.despesas_mensais + 1)) * FATOR_RENDA
     parcela_emprego = PESO_EMPREGO[dados.tipo_emprego]
     parcela_dependentes = peso_dependentes(dados.num_dependentes)
@@ -65,4 +71,5 @@ def calcular_score(dados: DadosEntrevista) -> int:
         final,
         " (truncado)" if final != round(bruto) else "",
     )
+    observado.set_outputs({"score": final, "bruto": bruto, "truncado": final != round(bruto)})
     return final

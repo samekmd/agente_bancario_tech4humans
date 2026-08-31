@@ -11,6 +11,7 @@ from datetime import UTC, datetime
 import httpx
 
 from banco_agil.domain.models import Cotacao
+from banco_agil.observability.tracing import TOOL, span
 from banco_agil.utils.exceptions import CotacaoIndisponivelError, EntradaInvalidaError
 from banco_agil.utils.logging import get_logger
 from banco_agil.utils.validators import arredondar
@@ -75,6 +76,22 @@ def obter_cotacao(
 
     proprio_client = client is None
     client = client or httpx.Client(timeout=timeout_s)
+    # HTTP puro: não passa por LangChain, então o autolog não enxerga.
+    with span("obter_cotacao", TOOL, par=par_normalizado, url=url):
+        return _consultar(
+            client, url, chave, par_normalizado, timeout_s, max_retries, proprio_client
+        )
+
+
+def _consultar(
+    client: httpx.Client,
+    url: str,
+    chave: str,
+    par_normalizado: str,
+    timeout_s: float,
+    max_retries: int,
+    proprio_client: bool,
+) -> Cotacao:
     try:
         for tentativa in range(max_retries + 1):
             try:

@@ -23,8 +23,8 @@ class Settings(BaseSettings):
 
     # Provedor de LLM
     groq_api_key: SecretStr
-    modelo_dialogo: str = "qwen/qwen3.6-27b"
-    modelo_extracao: str = "qwen/qwen3.6-27b"
+    modelo_dialogo: str = "openai/gpt-oss-20b"  # "qwen/qwen3.6-27b"
+    modelo_extracao: str = "openai/gpt-oss-20b"  # "qwen/qwen3.6-27b"
     temperatura_dialogo: float = 0.3
     temperatura_extracao: float = 0.0
     # Teto de geração por resposta. Folgado para qualquer resposta legítima somada ao
@@ -44,6 +44,13 @@ class Settings(BaseSettings):
 
     # Observabilidade
     log_level: str = "INFO"
+    mlflow_habilitado: bool = True
+    mlflow_tracking_uri: str = "http://localhost:5000"
+    mlflow_experimento: str = "banco-agil"
+    # Servidor fora do ar não pode travar atendimento: o MLflow tenta por minutos se
+    # deixarmos o default dele.
+    mlflow_timeout_s: float = 3.0
+    mlflow_max_retries: int = 1
 
     # Dados. Campo, e não property, para que testes e outros ambientes possam apontar as
     # bases para outro diretório sem tocar em código.

@@ -12,6 +12,7 @@ from langchain_core.messages import AIMessage, HumanMessage
 from langgraph.graph.state import CompiledStateGraph
 
 from banco_agil.graph import build_graph, config_execucao
+from banco_agil.observability.setup import configurar_mlflow
 from banco_agil.state import estado_inicial
 from banco_agil.utils.logging import configurar_logging, get_logger
 
@@ -27,6 +28,7 @@ logger = get_logger("ui")
 def obter_grafo() -> CompiledStateGraph:
     """Compila o grafo uma vez por processo. O checkpointer separa as conversas por thread."""
     configurar_logging()
+    configurar_mlflow()
     return build_graph()
 
 

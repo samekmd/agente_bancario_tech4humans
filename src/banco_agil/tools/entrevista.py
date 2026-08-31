@@ -6,6 +6,7 @@ from langchain_core.tools import InjectedToolCallId, tool
 from langgraph.prebuilt import InjectedState
 from langgraph.types import Command
 
+from banco_agil.observability.tags import marcar_entrevista
 from banco_agil.services.entrevista import (
     CAMPOS,
     PERGUNTAS,
@@ -111,6 +112,7 @@ def finalizar_entrevista(
         cliente.score_atual,
         atualizado.score_atual,
     )
+    marcar_entrevista(cliente.score_atual, atualizado.score_atual)
 
     pendente = valor_para_nova_tentativa(state.get("solicitacao_atual"))
     if pendente is not None:

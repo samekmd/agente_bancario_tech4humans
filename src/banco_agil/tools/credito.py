@@ -6,6 +6,7 @@ from langchain_core.tools import InjectedToolCallId, tool
 from langgraph.prebuilt import InjectedState
 from langgraph.types import Command
 
+from banco_agil.observability.tags import marcar_desfecho_pedido
 from banco_agil.services.limite import limite_maximo_permitido, processar_pedido_aumento
 from banco_agil.state import AtendimentoState
 from banco_agil.tools.base import falha, falha_de, responder, sucesso
@@ -88,6 +89,7 @@ def solicitar_aumento_limite(
         avaliacao.status_pedido.value,
         dump_seguro(pedido),
     )
+    marcar_desfecho_pedido(avaliacao.status_pedido, avaliacao.limite_solicitado)
 
     payload = sucesso(
         aprovado=avaliacao.aprovado,
