@@ -9,6 +9,9 @@ from langchain_core.tools import InjectedToolCallId, tool
 from langgraph.types import Command
 
 from banco_agil.tools.base import responder, sucesso
+from banco_agil.utils.logging import get_logger
+
+logger = get_logger("tools.sistema")
 
 
 @tool
@@ -22,5 +25,6 @@ def encerrar_atendimento(
     para encerrar. Informe em `motivo` o que o cliente disse, em poucas palavras. Depois
     de chamar, despeça-se com cordialidade na mesma resposta.
     """
+    logger.info("encerrar_atendimento: motivo=%r", motivo)
     payload = sucesso(motivo=motivo, mensagem="Atendimento encerrado.")
     return responder(payload, tool_call_id, encerrado=True)

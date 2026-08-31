@@ -72,10 +72,68 @@ class TestValidarValorMonetario:
     def test_converte_formatos_aceitos(self, entrada: str | float, esperado: float) -> None:
         assert validar_valor_monetario(entrada) == esperado
 
-    @pytest.mark.parametrize("entrada", ["muito dinheiro", "", "-500"])
+    @pytest.mark.parametrize(
+        ("entrada", "esperado"),
+        [
+            ("8.000", 8000.0),
+            ("R$ 3.000", 3000.0),
+            ("1.234", 1234.0),
+            ("1.234.567", 1234567.0),
+            ("R$8000", 8000.0),
+            ("12,5", 12.5),
+            ("  8000  ", 8000.0),
+        ],
+    )
+    def test_ponto_sem_centavos_e_separador_de_milhar(self, entrada: str, esperado: float) -> None:
+        """Em real, `8.000` é oito mil — não oito. Três dígitos após o ponto é milhar."""
+        assert validar_valor_monetario(entrada) == esperado
+
+    @pytest.mark.parametrize(
+        ("entrada", "esperado"),
+        [("3000 reais", 3000.0), ("100 dólares", 100.0), ("50 EUR", 50.0), ("R$ 2.500", 2500.0)],
+    )
+    def test_nome_de_moeda_acompanha_o_valor(self, entrada: str, esperado: float) -> None:
+        assert validar_valor_monetario(entrada) == esperado
+
+    @pytest.mark.parametrize(
+        "entrada",
+        [
+            "8 mil",
+            "8k",
+            "2,5 mil",
+            "uns 3 mil",
+            "mil reais",
+            "uns oito mil",
+            "8,000.50",
+            "1.2345",
+            "1.2.3",
+            "muito dinheiro",
+            "",
+            "-500",
+        ],
+    )
     def test_rejeita_entrada_invalida(self, entrada: str) -> None:
         with pytest.raises(EntradaInvalidaError):
             validar_valor_monetario(entrada)
+
+    @pytest.mark.parametrize(
+        ("entrada", "valor_corrompido"),
+        [("8 mil", 8.0), ("R$ 3.000", 3.0), ("2,5 mil", 2.5), ("8k", 8.0)],
+    )
+    def test_regressao_nao_devolve_numero_errado_em_silencio(
+        self, entrada: str, valor_corrompido: float
+    ) -> None:
+        """A versão antiga descartava letras e lia `8.000` como decimal.
+
+        `8 mil` virava R$ 8,00 e `R$ 3.000` virava R$ 3,00, sem erro nenhum — o score da
+        entrevista saía calculado em cima disso. Recusar é obrigatório; devolver o número
+        errado, nunca.
+        """
+        try:
+            resultado = validar_valor_monetario(entrada)
+        except EntradaInvalidaError:
+            return
+        assert resultado != valor_corrompido
 
 
 class TestArredondar:

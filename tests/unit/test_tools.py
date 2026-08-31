@@ -262,6 +262,66 @@ class TestCredito:
         assert payload["limite_maximo_permitido"] == 3000.0
         assert comando.update["solicitacao_atual"] == pedido
 
+    def test_aprovado_avisa_que_o_limite_ainda_nao_vale(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Aprovar registra a decisão do pedido; o limite em vigor não muda."""
+        pedido = SolicitacaoAumento(
+            cpf_cliente=CLIENTE.cpf,
+            data_hora_solicitacao=datetime(2026, 8, 29, 17, 0),
+            limite_atual=2500.0,
+            novo_limite_solicitado=6000.0,
+            status_pedido=StatusPedido.APROVADO,
+        )
+        avaliacao = ResultadoAvaliacao(
+            aprovado=True,
+            status_pedido=StatusPedido.APROVADO,
+            score_considerado=580,
+            limite_maximo=8000.0,
+            limite_solicitado=6000.0,
+        )
+        monkeypatch.setattr(
+            "banco_agil.tools.credito.processar_pedido_aumento",
+            lambda *a, **k: (pedido, avaliacao),
+        )
+
+        payload = payload_de(
+            chamar(solicitar_aumento_limite, novo_limite="6000", state=estado(cliente=CLIENTE))
+        )
+
+        assert payload["aprovado"] is True
+        assert payload["limite_ja_aplicado"] is False
+        assert payload["limite_atual"] == CLIENTE.limite_atual
+
+    def test_novo_pedido_consome_o_valor_pendente(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Sem isso o agente reofereceria o mesmo valor a cada turno, em laço."""
+        pedido = SolicitacaoAumento(
+            cpf_cliente=CLIENTE.cpf,
+            data_hora_solicitacao=datetime(2026, 8, 30, 11, 0),
+            limite_atual=2500.0,
+            novo_limite_solicitado=6000.0,
+            status_pedido=StatusPedido.REJEITADO,
+        )
+        avaliacao = ResultadoAvaliacao(
+            aprovado=False,
+            status_pedido=StatusPedido.REJEITADO,
+            score_considerado=470,
+            limite_maximo=3000.0,
+            limite_solicitado=6000.0,
+        )
+        monkeypatch.setattr(
+            "banco_agil.tools.credito.processar_pedido_aumento",
+            lambda *a, **k: (pedido, avaliacao),
+        )
+
+        comando = chamar(
+            solicitar_aumento_limite,
+            novo_limite="6000",
+            state=estado(cliente=CLIENTE, limite_pendente_reavaliacao=6000.0),
+        )
+
+        assert comando.update["limite_pendente_reavaliacao"] is None
+
     def test_valor_ilegivel_nao_chega_ao_service(self, monkeypatch: pytest.MonkeyPatch) -> None:
         def nao_deveria(*a: Any, **k: Any) -> None:
             raise AssertionError("o service não deveria ser chamado")
@@ -278,7 +338,10 @@ class TestCredito:
 class TestEntrevista:
     def test_registra_slot_e_aponta_o_proximo_campo(self) -> None:
         comando = chamar(
-            registrar_resposta_entrevista, campo="renda_mensal", valor="8000", state=estado()
+            registrar_resposta_entrevista,
+            campo="renda_mensal",
+            valor="8000",
+            state=estado(entrevista_campo_perguntado="renda_mensal"),
         )
         payload = payload_de(comando)
 
@@ -286,6 +349,35 @@ class TestEntrevista:
         assert payload["proximo_campo"] == "despesas_mensais"
         assert payload["entrevista_completa"] is False
         assert comando.update["entrevista_slots"] == {"renda_mensal": 8000.0}
+        # Consumido: o próximo campo precisa ser perguntado antes de ser registrado.
+        assert comando.update["entrevista_campo_perguntado"] is None
+
+    def test_registrar_sem_ter_perguntado_e_recusado(self) -> None:
+        """O bug real: o LLM tirou R$ 8.000 do histórico e preencheu a renda sem perguntar."""
+        comando = chamar(
+            registrar_resposta_entrevista,
+            campo="renda_mensal",
+            valor="8000",
+            state=estado(entrevista_campo_perguntado=None),
+        )
+        payload = payload_de(comando)
+
+        assert payload["ok"] is False
+        assert payload["campo_esperado"] == "renda_mensal"
+        assert "entrevista_slots" not in comando.update
+
+    def test_registrar_campo_diferente_do_perguntado_e_recusado(self) -> None:
+        comando = chamar(
+            registrar_resposta_entrevista,
+            campo="tem_dividas",
+            valor="não",
+            state=estado(entrevista_campo_perguntado="renda_mensal"),
+        )
+        payload = payload_de(comando)
+
+        assert payload["ok"] is False
+        assert "renda_mensal" in payload["erro"]
+        assert "entrevista_slots" not in comando.update
 
     def test_ultimo_campo_marca_entrevista_completa(self) -> None:
         slots = {
@@ -300,7 +392,7 @@ class TestEntrevista:
                 registrar_resposta_entrevista,
                 campo="tem_dividas",
                 valor="não",
-                state=estado(entrevista_slots=slots),
+                state=estado(entrevista_slots=slots, entrevista_campo_perguntado="tem_dividas"),
             )
         )
 
@@ -310,7 +402,10 @@ class TestEntrevista:
 
     def test_valor_invalido_vira_erro_tratado(self) -> None:
         comando = chamar(
-            registrar_resposta_entrevista, campo="tipo_emprego", valor="empresário", state=estado()
+            registrar_resposta_entrevista,
+            campo="tipo_emprego",
+            valor="empresário",
+            state=estado(entrevista_campo_perguntado="tipo_emprego"),
         )
 
         assert payload_de(comando)["ok"] is False
@@ -332,6 +427,41 @@ class TestEntrevista:
         assert payload["melhorou"] is True
         assert comando.update["cliente"] == atualizado
         assert comando.update["entrevistas_realizadas"] == 1
+
+    def test_finalizar_guarda_o_valor_pedido_antes_da_entrevista(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """O cliente não deve ter que repetir o valor que já pediu."""
+        rejeitado = SolicitacaoAumento(
+            cpf_cliente=CLIENTE.cpf,
+            data_hora_solicitacao=datetime(2026, 8, 30, 10, 0),
+            limite_atual=2500.0,
+            novo_limite_solicitado=6000.0,
+            status_pedido=StatusPedido.REJEITADO,
+        )
+        monkeypatch.setattr(
+            "banco_agil.tools.entrevista.concluir_entrevista",
+            lambda *a, **k: CLIENTE.model_copy(update={"score_atual": 580}),
+        )
+
+        comando = chamar(
+            finalizar_entrevista, state=estado(cliente=CLIENTE, solicitacao_atual=rejeitado)
+        )
+
+        assert payload_de(comando)["valor_pedido_antes"] == 6000.0
+        assert comando.update["limite_pendente_reavaliacao"] == 6000.0
+
+    def test_finalizar_sem_pedido_anterior_nao_guarda_valor(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(
+            "banco_agil.tools.entrevista.concluir_entrevista",
+            lambda *a, **k: CLIENTE.model_copy(update={"score_atual": 580}),
+        )
+
+        comando = chamar(finalizar_entrevista, state=estado(cliente=CLIENTE))
+
+        assert comando.update["limite_pendente_reavaliacao"] is None
 
     def test_finalizar_sem_todos_os_campos_falha_sem_levantar(
         self, monkeypatch: pytest.MonkeyPatch

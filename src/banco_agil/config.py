@@ -23,10 +23,13 @@ class Settings(BaseSettings):
 
     # Provedor de LLM
     groq_api_key: SecretStr
-    modelo_dialogo: str = "openai/gpt-oss-120b"
-    modelo_extracao: str = "openai/gpt-oss-120b"
+    modelo_dialogo: str = "qwen/qwen3.6-27b"
+    modelo_extracao: str = "qwen/qwen3.6-27b"
     temperatura_dialogo: float = 0.3
     temperatura_extracao: float = 0.0
+    # Teto de geração por resposta. Folgado para qualquer resposta legítima somada ao
+    # raciocínio interno, curto o bastante para interromper repetição degenerada.
+    max_tokens_resposta: int = 1024
 
     # Parâmetros de negócio
     max_tentativas_auth: int = 3

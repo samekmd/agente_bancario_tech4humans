@@ -14,6 +14,7 @@ from banco_agil.services.limite import (
     faixa_para_score,
     limite_maximo_permitido,
     processar_pedido_aumento,
+    valor_para_nova_tentativa,
 )
 from banco_agil.utils.exceptions import DadosIndisponiveisError
 
@@ -176,3 +177,28 @@ class TestProcessarPedidoAumento:
         assert pedido.limite_atual == cliente.limite_atual
         assert pedido.novo_limite_solicitado == 6000.0
         assert pedido.data_hora_solicitacao == agora
+
+
+class TestValorParaNovaTentativa:
+    """Só um pedido rejeitado merece ser reoferecido depois da entrevista."""
+
+    def _pedido(self, status: StatusPedido) -> SolicitacaoAumento:
+        return SolicitacaoAumento(
+            cpf_cliente="39053344705",
+            data_hora_solicitacao=datetime(2026, 8, 30, 10, 0),
+            limite_atual=2500.0,
+            novo_limite_solicitado=6000.0,
+            status_pedido=status,
+        )
+
+    def test_pedido_rejeitado_devolve_o_valor(self) -> None:
+        assert valor_para_nova_tentativa(self._pedido(StatusPedido.REJEITADO)) == 6000.0
+
+    def test_pedido_aprovado_nao_se_reabre(self) -> None:
+        assert valor_para_nova_tentativa(self._pedido(StatusPedido.APROVADO)) is None
+
+    def test_pedido_pendente_nao_e_reoferecido(self) -> None:
+        assert valor_para_nova_tentativa(self._pedido(StatusPedido.PENDENTE)) is None
+
+    def test_sem_pedido_nao_ha_o_que_reoferecer(self) -> None:
+        assert valor_para_nova_tentativa(None) is None

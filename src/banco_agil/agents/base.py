@@ -5,11 +5,11 @@ regra 4: o escopo do agente é o conjunto de ferramentas que ele recebe, não um
 de prompt.
 """
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from functools import cache
 
 from langchain.agents import create_agent
-from langchain.agents.middleware import dynamic_prompt
+from langchain.agents.middleware import AgentMiddleware, dynamic_prompt
 from langchain_core.language_models import BaseChatModel
 from langgraph.graph.state import CompiledStateGraph
 
@@ -47,11 +47,15 @@ def construir_agente(
     agente: Agente,
     contexto: Contexto | None = None,
     llm: BaseChatModel | None = None,
+    middlewares: Sequence[AgentMiddleware] = (),
 ) -> CompiledStateGraph:
     """Monta o subgrafo de um agente com suas tools e o prompt do seu domínio.
 
     `contexto` recebe o estado e devolve os fatos que o LLM não deve inferir — o campo que
     falta na entrevista, o limite do cliente, quantas tentativas de autenticação restam.
+
+    `middlewares` são os hooks específicos do agente, somados ao prompt dinâmico. Hoje só
+    a entrevista usa, para marcar no estado qual campo foi de fato perguntado.
     """
     if llm is None:
         from banco_agil.llm import llm_dialogo
@@ -66,6 +70,6 @@ def construir_agente(
         model=llm,
         tools=list(tools_de(agente)),
         state_schema=AtendimentoState,
-        middleware=[prompt_do_turno],
+        middleware=[prompt_do_turno, *middlewares],
         name=agente.value,
     )

@@ -45,3 +45,28 @@ def configurar_logging(nivel: str | None = None) -> None:
 def get_logger(nome: str) -> Logger:
     """Retorna um logger filho do logger raiz da aplicação."""
     return logging.getLogger(f"{_RAIZ}.{nome}")
+
+
+def dump_seguro(modelo: object) -> dict[str, object]:
+    """Serializa um modelo Pydantic para log, mascarando qualquer campo de CPF.
+
+    Existe para que `model_dump()` num log não acabe registrando o documento do cliente.
+    """
+    dados = modelo.model_dump(mode="json")  # type: ignore[attr-defined]
+    return {
+        chave: mascarar_cpf(valor) if "cpf" in chave and isinstance(valor, str) else valor
+        for chave, valor in dados.items()
+    }
+
+
+def mascarar_cpf(cpf: str | None) -> str:
+    """Reduz o CPF ao suficiente para rastrear uma execução, sem registrar o documento.
+
+    `39053344705` vira `390.***.**7-05`.
+    """
+    if not cpf:
+        return "-"
+    digitos = "".join(c for c in cpf if c.isdigit())
+    if len(digitos) != 11:
+        return "***"
+    return f"{digitos[:3]}.***.**{digitos[8]}-{digitos[9:]}"

@@ -15,6 +15,9 @@ def criar_llm(modelo: str | None = None, temperatura: float | None = None) -> Ba
     `reasoning_format="hidden"` é essencial: sem isso, modelos de raciocínio (a família
     `gpt-oss`, por exemplo) misturam o rascunho do raciocínio na resposta, e o cliente lê
     coisas como "We need to continue after they answer" no meio do atendimento.
+
+    `max_tokens` é a rede de segurança para o outro sintoma observado: repetição
+    degenerada, em que o modelo repete o mesmo fragmento dezenas de vezes.
     """
     settings = get_settings()
     return ChatGroq(
@@ -22,6 +25,7 @@ def criar_llm(modelo: str | None = None, temperatura: float | None = None) -> Ba
         temperature=settings.temperatura_dialogo if temperatura is None else temperatura,
         api_key=settings.groq_api_key.get_secret_value(),
         reasoning_format="hidden",
+        max_tokens=settings.max_tokens_resposta,
     )
 
 

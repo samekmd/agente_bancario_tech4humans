@@ -37,8 +37,16 @@ def pagina(monkeypatch: pytest.MonkeyPatch) -> Any:
 
 
 def responder(pagina: AppTest, texto: str) -> str:
-    """Manda uma mensagem pelo chat e devolve o que o assistente respondeu."""
+    """Manda uma mensagem pelo chat e devolve a resposta crua do assistente.
+
+    Vem do histórico, e não do markdown renderizado, porque a renderização escapa `$`.
+    """
     pagina.chat_input[0].set_value(texto).run()
+    return pagina.session_state["historico"][-1][1]
+
+
+def renderizado(pagina: AppTest) -> str:
+    """O texto como o Streamlit recebeu para renderizar."""
     return pagina.chat_message[-1].markdown[0].value
 
 
@@ -151,3 +159,30 @@ def test_configuracao_ausente_orienta_em_vez_de_quebrar(monkeypatch: pytest.Monk
     assert at.exception == []
     assert "GROQ_API_KEY" in at.error[0].value
     assert at.chat_input == []
+
+
+def test_cifrao_e_escapado_para_nao_virar_latex(pagina: Any) -> None:
+    """`st.markdown` lê `$...$` como fórmula: dois valores em reais perdiam os cifrões.
+
+    Foi o que chegou ao cliente como "R 5.000,00 ... R 1.000,00" no lugar de "R$ ...".
+    """
+    at = pagina(
+        chama("autenticar_cliente", {"cpf": CPF, "data_nascimento": NASCIMENTO}, "c1"),
+        fala("Não aprovei R$ 5.000,00. Seu perfil permite até R$ 1.000,00."),
+    )
+
+    resposta = responder(at, "quero 5000 de limite")
+
+    # O texto do agente continua intacto no histórico...
+    assert resposta == "Não aprovei R$ 5.000,00. Seu perfil permite até R$ 1.000,00."
+    # ...e chega escapado ao Streamlit, para os dois cifrões sobreviverem na tela.
+    assert renderizado(at) == "Não aprovei R\\$ 5.000,00. Seu perfil permite até R\\$ 1.000,00."
+
+
+def test_cifrao_do_cliente_tambem_e_escapado(pagina: Any) -> None:
+    at = pagina(fala("Certo."))
+
+    responder(at, "quero R$ 5.000,00 de limite")
+
+    exibido = [m.markdown[0].value for m in at.chat_message]
+    assert any("R\\$ 5.000,00" in texto for texto in exibido)

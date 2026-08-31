@@ -23,6 +23,16 @@ GROQ_API_KEY=sua-chave-aqui
 """
 
 
+def texto_seguro(texto: str) -> str:
+    """Escapa `$` para o Streamlit não ler o par de cifrões como fórmula LaTeX.
+
+    `st.markdown` trata `$...$` como matemática: uma mensagem com dois valores em reais
+    perde os dois cifrões e italiza o miolo. Foi assim que "R$ 5.000,00 ... R$ 1.000,00"
+    chegou ao cliente como "R 5.000,00 ... R 1.000,00".
+    """
+    return texto.replace("$", r"\$")
+
+
 def _barra_lateral() -> None:
     with st.sidebar:
         st.subheader(TITULO)
@@ -37,7 +47,7 @@ def _historico() -> None:
         st.markdown(SAUDACAO)
     for papel, texto in st.session_state.historico:
         with st.chat_message(papel):
-            st.markdown(texto)
+            st.markdown(texto_seguro(texto))
 
 
 def renderizar() -> None:
@@ -68,11 +78,11 @@ def renderizar() -> None:
 
     st.session_state.historico.append(("user", pergunta))
     with st.chat_message("user"):
-        st.markdown(pergunta)
+        st.markdown(texto_seguro(pergunta))
 
     with st.chat_message("assistant"), st.spinner("Consultando..."):
         resposta = enviar_mensagem(pergunta)
-        st.markdown(resposta)
+        st.markdown(texto_seguro(resposta))
     st.session_state.historico.append(("assistant", resposta))
 
     if st.session_state.encerrado:

@@ -5,6 +5,7 @@ sobre o dado ser válido é sempre destas funções.
 """
 
 import re
+import unicodedata
 from datetime import date, datetime
 from decimal import ROUND_HALF_UP, Decimal
 
@@ -12,6 +13,21 @@ from banco_agil.utils.exceptions import EntradaInvalidaError
 
 _SOMENTE_DIGITOS = re.compile(r"\D")
 _FORMATOS_DATA = ("%d/%m/%Y", "%Y-%m-%d", "%d-%m-%Y")
+
+# Decoração de moeda que pode acompanhar o número sem torná-lo ambíguo. Lista fechada:
+# qualquer outra palavra faz o valor ser recusado, e não silenciosamente descartada.
+_DECORACAO_MOEDA = re.compile(
+    r"r\$|rs(?![a-z])|\$|brl|usd|eur|gbp|reais|real|dolares|dolar|euros|euro|libras|libra",
+)
+
+# Formas aceitas, mutuamente exclusivas. O que separa milhar de centavo é a quantidade de
+# dígitos depois do ponto: três é grupo de milhar, um ou dois é centavo.
+_INTEIRO = re.compile(r"^\d+$")
+_MILHAR_PT = re.compile(r"^\d{1,3}(\.\d{3})+$")
+_DECIMAL_VIRGULA = re.compile(r"^\d{1,3}(\.\d{3})*,\d{1,2}$|^\d+,\d{1,2}$")
+_DECIMAL_PONTO = re.compile(r"^\d+\.\d{1,2}$")
+
+VALOR_ILEGIVEL = "Não entendi o valor. Pode me dizer em números? Por exemplo: 8000 ou R$ 8.000,00."
 
 
 def normalizar_cpf(valor: str) -> str:
@@ -62,24 +78,46 @@ def validar_data_nascimento(valor: str, hoje: date | None = None) -> date:
     raise EntradaInvalidaError("Data de nascimento inválida. Use o formato DD/MM/AAAA.")
 
 
-def validar_valor_monetario(valor: str | float | int) -> float:
-    """Converte um valor monetário em `float`, aceitando `R$ 10.000,00` ou `10000.50`.
+def _limpar_moeda(texto: str) -> str:
+    """Remove símbolo e nome de moeda, acento e espaço, preservando o resto intacto.
 
-    Levanta `EntradaInvalidaError` para texto não numérico ou valor negativo.
+    O que sobrar precisa ser um número válido por si só — palavra desconhecida sobrevive
+    à limpeza justamente para o valor ser recusado depois.
+    """
+    decomposto = unicodedata.normalize("NFKD", texto or "")
+    sem_acento = "".join(c for c in decomposto if not unicodedata.combining(c))
+    sem_moeda = _DECORACAO_MOEDA.sub("", sem_acento.lower())
+    return "".join(sem_moeda.split())
+
+
+def validar_valor_monetario(valor: str | float | int) -> float:
+    """Converte um valor monetário em `float`, aceitando as formas usuais em pt-BR.
+
+    Aceita `8000`, `8.000`, `R$ 8.000,00`, `8000.50`, `12,5` e `100 dólares`. Recusa
+    qualquer coisa cuja leitura seja ambígua — `8 mil`, `8k`, `2,5 mil`, `8,000.50` —
+    porque devolver um número errado em silêncio é pior que pedir o valor de novo.
+
+    `1.234` é lido como 1234: em real, ponto sem centavos é separador de milhar, e três
+    casas decimais não existem.
+
+    Levanta `EntradaInvalidaError` para valor ilegível ou negativo.
     """
     if isinstance(valor, (int, float)) and not isinstance(valor, bool):
         numero = float(valor)
     else:
-        texto = re.sub(r"[^\d,.\-]", "", str(valor or ""))
+        texto = _limpar_moeda(str(valor or ""))
         if not texto:
-            raise EntradaInvalidaError("Valor inválido.")
-        # Em pt-BR a vírgula é o separador decimal e o ponto é o de milhar.
-        if "," in texto:
-            texto = texto.replace(".", "").replace(",", ".")
-        try:
+            raise EntradaInvalidaError(VALOR_ILEGIVEL)
+
+        if _INTEIRO.match(texto) or _DECIMAL_PONTO.match(texto):
             numero = float(texto)
-        except ValueError as erro:
-            raise EntradaInvalidaError("Valor inválido.") from erro
+        elif _MILHAR_PT.match(texto):
+            numero = float(texto.replace(".", ""))
+        elif _DECIMAL_VIRGULA.match(texto):
+            numero = float(texto.replace(".", "").replace(",", "."))
+        else:
+            raise EntradaInvalidaError(VALOR_ILEGIVEL)
+
     if numero < 0:
         raise EntradaInvalidaError("O valor não pode ser negativo.")
     return numero

@@ -7,7 +7,10 @@ from langgraph.types import Command
 
 from banco_agil.services.cotacao import converter_entre_moedas, obter_cotacao
 from banco_agil.tools.base import falha_de, responder, sucesso
+from banco_agil.utils.logging import get_logger
 from banco_agil.utils.validators import validar_valor_monetario
+
+logger = get_logger("tools.cambio")
 
 
 @tool
@@ -21,10 +24,20 @@ def consultar_cotacao(
     preço de compra e de venda e o horário da última atualização. Se a cotação não puder
     ser obtida, retorna `ok: false` — nesse caso informe o cliente e não estime valores.
     """
+    logger.info("-> consultar_cotacao(par=%r)", par)
     try:
         cotacao = obter_cotacao(par)
     except Exception as erro:  # noqa: BLE001 - nenhuma tool levanta exceção para o grafo
-        return responder(falha_de(erro), tool_call_id)
+        return responder(falha_de(erro, "consultar_cotacao"), tool_call_id)
+
+    logger.info(
+        "<- consultar_cotacao: %s compra=%.4f venda=%.4f (%s, %s)",
+        cotacao.par,
+        cotacao.compra,
+        cotacao.venda,
+        cotacao.fonte,
+        cotacao.atualizado_em.isoformat(),
+    )
 
     payload = sucesso(
         par=cotacao.par,
@@ -49,11 +62,14 @@ def converter_valor(
     pedir o equivalente de um valor em outra moeda. Retorna o valor convertido e a taxa
     usada, para você poder citá-la.
     """
+    logger.info("-> converter_valor(valor=%r, de=%r, para=%r)", valor, de_moeda, para_moeda)
     try:
         quantia = validar_valor_monetario(valor)
         convertido, cotacao = converter_entre_moedas(quantia, de_moeda, para_moeda)
     except Exception as erro:  # noqa: BLE001 - nenhuma tool levanta exceção para o grafo
-        return responder(falha_de(erro), tool_call_id)
+        return responder(falha_de(erro, "converter_valor"), tool_call_id)
+
+    logger.info("<- converter_valor: %.2f -> %.2f pelo par %s", quantia, convertido, cotacao.par)
 
     payload = sucesso(
         valor_original=quantia,

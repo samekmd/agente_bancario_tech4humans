@@ -12,8 +12,11 @@ from langchain_core.messages import ToolMessage
 from langgraph.types import Command
 
 from banco_agil.utils.exceptions import BancoAgilError
+from banco_agil.utils.logging import get_logger
 
 ERRO_INESPERADO = "Tive um problema técnico aqui. Pode tentar de novo em instantes?"
+
+logger = get_logger("tools")
 
 
 def sucesso(**dados: Any) -> dict[str, Any]:  # noqa: ANN401 - payload varia por tool
@@ -26,14 +29,17 @@ def falha(erro: str, **dados: Any) -> dict[str, Any]:  # noqa: ANN401 - payload 
     return {"ok": False, "erro": erro, **dados}
 
 
-def falha_de(excecao: Exception) -> dict[str, Any]:
-    """Converte uma exceção em payload de erro.
+def falha_de(excecao: Exception, tool: str = "?") -> dict[str, Any]:
+    """Converte uma exceção em payload de erro, registrando o que aconteceu.
 
     Exceções de domínio carregam mensagem verbalizável; qualquer outra vira uma mensagem
-    genérica, para não vazar detalhe de implementação na conversa.
+    genérica, para não vazar detalhe de implementação na conversa. O log é o único lugar
+    onde o erro real aparece — sem ele, uma falha inesperada some sem deixar rastro.
     """
     if isinstance(excecao, BancoAgilError):
+        logger.warning("[%s] erro de domínio: %s", tool, excecao.mensagem)
         return falha(excecao.mensagem)
+    logger.exception("[%s] erro inesperado", tool)
     return falha(ERRO_INESPERADO)
 
 
@@ -52,6 +58,11 @@ def responder(
     rotear em cima de falha sem reler a conversa.
     """
     atualizacoes.setdefault("ultimo_erro", None if payload.get("ok") else payload.get("erro"))
+    logger.debug(
+        "payload devolvido ao agente: %s | estado atualizado: %s",
+        _serializar(payload),
+        sorted(atualizacoes),
+    )
     return Command(
         update={
             **atualizacoes,

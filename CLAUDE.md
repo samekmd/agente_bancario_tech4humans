@@ -106,8 +106,10 @@ modelagem provavelmente está errada.
 | `cpf` | `str \| None` | tool de autenticação |
 | `cliente` | `Cliente \| None` | tool de autenticação |
 | `solicitacao_atual` | `SolicitacaoAumento \| None` | tools de crédito |
+| `limite_pendente_reavaliacao` | `float \| None` | tools de crédito e entrevista |
 | `entrevista_slots` | `dict[str, Any]` | tools de entrevista |
 | `entrevistas_realizadas` | `int` | nó de entrevista |
+| `entrevista_campo_perguntado` | `str \| None` | nó de entrevista |
 | `encerrado` | `bool` | `encerrar_atendimento` |
 | `ultimo_erro` | `str \| None` | qualquer tool |
 
@@ -133,7 +135,10 @@ vindo de `st.session_state`. Não usar `interrupt()` para coletar input.
 - **Ciclo crédito ⇄ entrevista** tem teto: `entrevistas_realizadas` máximo 1 por sessão.
   `recursion_limit` do grafo configurado explicitamente.
 - **Entrevista** é slot filling determinístico: o Python decide qual dos cinco campos
-  falta e injeta no prompt; o LLM só extrai o valor. Nunca pular perguntas.
+  falta e injeta no prompt; o LLM só extrai o valor. Nunca pular perguntas — garantido
+  por `entrevista_campo_perguntado`: um middleware `after_model` marca o campo quando o
+  agente responde texto ao cliente, e a tool recusa registrar qualquer outro. Sem isso o
+  LLM preenche slots com valores tirados do histórico da conversa.
 - **Encerramento** por pedido do cliente é sempre possível, em qualquer agente, via
   `encerrar_atendimento`.
 

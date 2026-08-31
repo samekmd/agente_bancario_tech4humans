@@ -26,6 +26,21 @@ def contexto(state: AtendimentoState) -> str:
             f"Último pedido nesta conversa: R$ {pedido.novo_limite_solicitado:.2f}, "
             f"resultado {pedido.status_pedido.value}."
         )
+        if pedido.status_pedido is StatusPedido.APROVADO:
+            linhas.append(
+                "A aprovação registra a decisão do pedido; o limite em vigor continua "
+                f"sendo R$ {cliente.limite_atual:.2f}. Diga que a solicitação foi aprovada "
+                "e que o novo limite será aplicado em breve — nunca que ele já está valendo."
+            )
+
+    pendente = state.get("limite_pendente_reavaliacao")
+    if pendente is not None:
+        linhas.append(
+            f"O cliente já tinha pedido R$ {pendente:.2f} antes da entrevista, e esse valor "
+            "ainda não foi avaliado com o score novo. Ofereça tentar novamente esse mesmo "
+            "valor — não pergunte o valor do zero. Registre o pedido só depois que ele "
+            "confirmar; se ele preferir outro valor, use o que ele disser."
+        )
 
     if state.get("entrevistas_realizadas", 0) >= get_settings().max_entrevistas_por_sessao:
         linhas.append(

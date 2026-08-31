@@ -9,6 +9,9 @@ from langgraph.types import Command
 from banco_agil.services.autenticacao import autenticar
 from banco_agil.state import AtendimentoState
 from banco_agil.tools.base import falha, falha_de, responder, sucesso
+from banco_agil.utils.logging import get_logger, mascarar_cpf
+
+logger = get_logger("tools.autenticacao")
 
 
 @tool
@@ -26,16 +29,26 @@ def autenticar_cliente(
     verdadeiro, o limite de tentativas acabou e o atendimento precisa ser encerrado com
     cordialidade.
     """
+    tentativas_antes = state.get("tentativas_auth", 0)
+    # A data de nascimento nunca entra no log: junto com o CPF ela é a credencial.
+    logger.info(
+        "-> autenticar_cliente(cpf=%s) | tentativas antes=%d",
+        mascarar_cpf(cpf),
+        tentativas_antes,
+    )
     try:
-        resultado = autenticar(
-            cpf,
-            data_nascimento,
-            tentativas_atuais=state.get("tentativas_auth", 0),
-        )
+        resultado = autenticar(cpf, data_nascimento, tentativas_atuais=tentativas_antes)
     except Exception as erro:  # noqa: BLE001 - nenhuma tool levanta exceção para o grafo
-        return responder(falha_de(erro), tool_call_id)
+        return responder(falha_de(erro, "autenticar_cliente"), tool_call_id)
 
     if not resultado.autenticado:
+        logger.warning(
+            "<- autenticar_cliente: falhou (%s) | tentativas=%d, restantes=%d, bloqueado=%s",
+            resultado.motivo.value if resultado.motivo else "?",
+            resultado.tentativas,
+            resultado.tentativas_restantes,
+            resultado.bloqueado,
+        )
         payload = falha(
             "Os dados não conferem com a nossa base.",
             tentativas_restantes=resultado.tentativas_restantes,
@@ -50,6 +63,7 @@ def autenticar_cliente(
         )
 
     cliente = resultado.cliente
+    logger.info("<- autenticar_cliente: autenticado cpf=%s", mascarar_cpf(cliente.cpf))
     payload = sucesso(
         nome=cliente.nome,
         primeiro_nome=cliente.nome.split()[0],

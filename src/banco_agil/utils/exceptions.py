@@ -17,6 +17,14 @@ class EntradaInvalidaError(BancoAgilError):
     """Dado informado pelo cliente não passou na validação de formato."""
 
 
+class RespostaNaoSolicitadaError(BancoAgilError):
+    """A entrevista tentou registrar um campo que ainda não foi perguntado ao cliente.
+
+    Não é o valor que está inválido — é o momento. O cliente precisa responder à
+    pergunta antes de a resposta poder ser gravada.
+    """
+
+
 class DadosIndisponiveisError(BancoAgilError):
     """Uma base necessária não pôde ser lida (arquivo ausente ou corrompido)."""
 

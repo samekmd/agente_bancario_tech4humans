@@ -9,7 +9,10 @@ from langgraph.types import Command
 from banco_agil.services.limite import limite_maximo_permitido, processar_pedido_aumento
 from banco_agil.state import AtendimentoState
 from banco_agil.tools.base import falha, falha_de, responder, sucesso
+from banco_agil.utils.logging import dump_seguro, get_logger, mascarar_cpf
 from banco_agil.utils.validators import validar_valor_monetario
+
+logger = get_logger("tools.credito")
 
 SEM_CLIENTE = "Preciso confirmar a identidade do cliente antes de falar sobre o limite."
 
@@ -25,13 +28,22 @@ def consultar_limite(
     limite atual, o score e o limite máximo autorizado para a faixa desse score.
     """
     cliente = state.get("cliente")
+    logger.info("-> consultar_limite(cpf=%s)", mascarar_cpf(cliente.cpf if cliente else None))
     if cliente is None:
+        logger.warning("<- consultar_limite: sem cliente autenticado no estado")
         return responder(falha(SEM_CLIENTE), tool_call_id)
 
     try:
         maximo = limite_maximo_permitido(cliente.score_atual)
     except Exception as erro:  # noqa: BLE001 - nenhuma tool levanta exceção para o grafo
-        return responder(falha_de(erro), tool_call_id)
+        return responder(falha_de(erro, "consultar_limite"), tool_call_id)
+
+    logger.info(
+        "<- consultar_limite: atual=R$ %.2f, score=%d, teto=R$ %.2f",
+        cliente.limite_atual,
+        cliente.score_atual,
+        maximo,
+    )
 
     payload = sucesso(
         limite_atual=cliente.limite_atual,
@@ -55,14 +67,27 @@ def solicitar_aumento_limite(
     ofereça a entrevista de crédito ao cliente.
     """
     cliente = state.get("cliente")
+    logger.info(
+        "-> solicitar_aumento_limite(novo_limite=%r, cpf=%s)",
+        novo_limite,
+        mascarar_cpf(cliente.cpf if cliente else None),
+    )
     if cliente is None:
+        logger.warning("<- solicitar_aumento_limite: sem cliente autenticado no estado")
         return responder(falha(SEM_CLIENTE), tool_call_id)
 
     try:
         valor = validar_valor_monetario(novo_limite)
+        logger.debug("valor solicitado normalizado: %r -> %.2f", novo_limite, valor)
         pedido, avaliacao = processar_pedido_aumento(cliente, valor)
     except Exception as erro:  # noqa: BLE001 - nenhuma tool levanta exceção para o grafo
-        return responder(falha_de(erro), tool_call_id)
+        return responder(falha_de(erro, "solicitar_aumento_limite"), tool_call_id)
+
+    logger.info(
+        "<- solicitar_aumento_limite: %s | SolicitacaoAumento=%s",
+        avaliacao.status_pedido.value,
+        dump_seguro(pedido),
+    )
 
     payload = sucesso(
         aprovado=avaliacao.aprovado,
@@ -71,5 +96,15 @@ def solicitar_aumento_limite(
         limite_maximo_permitido=avaliacao.limite_maximo,
         limite_atual=cliente.limite_atual,
         score_atual=cliente.score_atual,
+        # Aprovar registra a decisão do pedido; não muda o limite em vigor. Sai no payload
+        # como dado para o agente não prometer ao cliente um limite que ainda não vale.
+        limite_ja_aplicado=False,
     )
-    return responder(payload, tool_call_id, solicitacao_atual=pedido)
+    return responder(
+        payload,
+        tool_call_id,
+        solicitacao_atual=pedido,
+        # Consumido: o pedido acabou de ser avaliado com o score atual, então não há
+        # mais o que reoferecer — é o que impede o agente de propor o valor em laço.
+        limite_pendente_reavaliacao=None,
+    )

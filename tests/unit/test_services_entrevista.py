@@ -8,13 +8,14 @@ from banco_agil.services.entrevista import (
     CAMPOS,
     OPCOES,
     concluir_entrevista,
+    conferir_pergunta_feita,
     montar_dados,
     normalizar_valor,
     proximo_campo,
     registrar_slot,
     slots_completos,
 )
-from banco_agil.utils.exceptions import EntradaInvalidaError
+from banco_agil.utils.exceptions import EntradaInvalidaError, RespostaNaoSolicitadaError
 
 pytestmark = pytest.mark.unit
 
@@ -58,6 +59,16 @@ class TestNormalizarValor:
     def test_valores_monetarios(self, valor: str, esperado: float) -> None:
         assert normalizar_valor("renda_mensal", valor) == esperado
 
+    @pytest.mark.parametrize("campo", ["renda_mensal", "despesas_mensais"])
+    @pytest.mark.parametrize("valor", ["8 mil", "uns 3 mil", "8k"])
+    def test_renda_ambigua_e_recusada_em_vez_de_truncada(self, campo: str, valor: str) -> None:
+        """`8 mil` não pode virar R$ 8,00 e entrar na fórmula de score."""
+        with pytest.raises(EntradaInvalidaError):
+            normalizar_valor(campo, valor)
+
+    def test_milhar_com_ponto_entra_pelo_valor_cheio(self) -> None:
+        assert normalizar_valor("renda_mensal", "R$ 8.000") == 8000.0
+
     @pytest.mark.parametrize(
         ("valor", "esperado"),
         [
@@ -98,9 +109,47 @@ class TestNormalizarValor:
     def test_dividas_em_linguagem_natural(self, valor: str, esperado: bool) -> None:
         assert normalizar_valor("tem_dividas", valor) is esperado
 
-    @pytest.mark.parametrize(("valor", "esperado"), [("0", 0), ("3", 3)])
-    def test_dependentes(self, valor: str, esperado: int) -> None:
+    @pytest.mark.parametrize(
+        ("valor", "esperado"),
+        [
+            ("0", 0),
+            ("3", 3),
+            ("  2  ", 2),
+            ("02", 2),
+            ("2 filhos", 2),
+            ("2 dependentes", 2),
+            ("1 filha", 1),
+            ("3,0", 3),
+            ("3.0", 3),
+            (3, 3),
+            (3.0, 3),
+        ],
+    )
+    def test_dependentes(self, valor: str | int | float, esperado: int) -> None:
         assert normalizar_valor("num_dependentes", valor) == esperado
+
+    @pytest.mark.parametrize(
+        "valor",
+        ["1_000", "nenhum", "zero", "dois", "tenho 3", "2.5", "-1", "", 3.5, True, False, None, -1],
+    )
+    def test_dependentes_recusa_o_que_nao_e_contagem(self, valor: object) -> None:
+        with pytest.raises(EntradaInvalidaError):
+            normalizar_valor("num_dependentes", valor)
+
+    @pytest.mark.parametrize(("valor", "valor_corrompido"), [("1_000", 1000), (True, 1)])
+    def test_regressao_int_nao_aceita_o_que_nao_devia(
+        self, valor: object, valor_corrompido: int
+    ) -> None:
+        """`int()` solto aceitava underscore de literal Python, e `bool` é subclasse de `int`.
+
+        `"1_000"` virava 1000 dependentes, e bastaria trocar a ordem das checagens para
+        `True` virar 1. Os dois precisam ser recusa, nunca número.
+        """
+        try:
+            resultado = normalizar_valor("num_dependentes", valor)
+        except EntradaInvalidaError:
+            return
+        assert resultado != valor_corrompido
 
     @pytest.mark.parametrize(
         ("campo", "valor"),
@@ -184,3 +233,24 @@ class TestConcluirEntrevista:
             concluir_entrevista(cliente, {"renda_mensal": 8000.0}, repo=repo_clientes)
 
         assert repo_clientes.buscar_por_cpf("39053344705").score_atual == 470
+
+
+class TestConferirPerguntaFeita:
+    """Nenhum campo pode ser registrado sem ter sido perguntado ao cliente."""
+
+    def test_campo_perguntado_passa(self) -> None:
+        assert conferir_pergunta_feita("renda_mensal", "renda_mensal") is None
+
+    def test_nada_perguntado_ainda_e_recusado(self) -> None:
+        with pytest.raises(RespostaNaoSolicitadaError, match="Ainda não perguntei"):
+            conferir_pergunta_feita("renda_mensal", None)
+
+    def test_campo_diferente_do_perguntado_e_recusado(self) -> None:
+        with pytest.raises(RespostaNaoSolicitadaError, match="renda_mensal"):
+            conferir_pergunta_feita("tem_dividas", "renda_mensal")
+
+    @pytest.mark.parametrize("campo", CAMPOS)
+    def test_vale_para_todos_os_cinco_campos(self, campo: str) -> None:
+        assert conferir_pergunta_feita(campo, campo) is None
+        with pytest.raises(RespostaNaoSolicitadaError):
+            conferir_pergunta_feita(campo, None)

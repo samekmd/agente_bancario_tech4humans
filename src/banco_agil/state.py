@@ -25,10 +25,16 @@ class AtendimentoState(TypedDict):
 
     # Crédito
     solicitacao_atual: SolicitacaoAumento | None
+    # Valor que o cliente pediu antes da entrevista e ainda não foi reavaliado com o
+    # score novo. Existir aqui é o que autoriza o crédito a reoferecer esse valor.
+    limite_pendente_reavaliacao: float | None
 
     # Entrevista de crédito
     entrevista_slots: dict[str, Any]
     entrevistas_realizadas: int
+    # Campo que o agente de fato perguntou ao cliente. Só ele pode ser registrado —
+    # é o que impede o LLM de preencher um slot com valor tirado do histórico.
+    entrevista_campo_perguntado: str | None
 
     # Ciclo de vida
     encerrado: bool
@@ -45,8 +51,10 @@ def estado_inicial() -> AtendimentoState:
         cpf=None,
         cliente=None,
         solicitacao_atual=None,
+        limite_pendente_reavaliacao=None,
         entrevista_slots={},
         entrevistas_realizadas=0,
+        entrevista_campo_perguntado=None,
         encerrado=False,
         ultimo_erro=None,
     )

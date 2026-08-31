@@ -8,7 +8,10 @@ from pathlib import Path
 from banco_agil.domain.models import Cliente
 from banco_agil.repositories.base import escrever_csv, ler_csv
 from banco_agil.utils.exceptions import ClienteNaoEncontradoError
+from banco_agil.utils.logging import get_logger, mascarar_cpf
 from banco_agil.utils.validators import normalizar_cpf
+
+logger = get_logger("repositories.clientes")
 
 COLUNAS = ("cpf", "nome", "data_nascimento", "limite_atual", "score_atual")
 
@@ -53,14 +56,24 @@ class ClientesRepository:
         Levanta `ClienteNaoEncontradoError` se o CPF não existir na base.
         """
         alvo = normalizar_cpf(cpf)
+        logger.info(
+            "atualizando score de cpf=%s para %d em %s",
+            mascarar_cpf(alvo),
+            novo_score,
+            self.caminho.name,
+        )
         linhas = self._linhas()
         atualizado: Cliente | None = None
         for linha in linhas:
             if linha["cpf"] == alvo:
+                anterior = linha["score_atual"]
                 atualizado = self._para_modelo({**linha, "score_atual": str(novo_score)})
                 linha["score_atual"] = str(atualizado.score_atual)
+                logger.debug("linha encontrada: score %s -> %s", anterior, linha["score_atual"])
                 break
         if atualizado is None:
+            logger.warning("cpf=%s não está na base %s", mascarar_cpf(alvo), self.caminho.name)
             raise ClienteNaoEncontradoError("Não encontrei esse CPF na nossa base.")
         escrever_csv(self.caminho, COLUNAS, linhas)
+        logger.info("score persistido: %d linhas reescritas em %s", len(linhas), self.caminho.name)
         return atualizado

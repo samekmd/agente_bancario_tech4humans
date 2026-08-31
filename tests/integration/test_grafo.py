@@ -174,41 +174,69 @@ class TestGuardaDeAutenticacao:
 
 class TestCicloCreditoEntrevista:
     def test_rejeitado_vira_aprovado_depois_da_entrevista(self) -> None:
+        """O ciclo inteiro, com a entrevista perguntando antes de registrar cada campo."""
+        respostas = [
+            chama("autenticar_cliente", {"cpf": CPF, "data_nascimento": NASCIMENTO}, "c1"),
+            fala("Olá, Beatriz!"),
+            chama("transferir_para_credito", {}, "c2"),
+            chama("solicitar_aumento_limite", {"novo_limite": "6000"}, "c3"),
+            fala("Não consegui aprovar esse valor. Quer responder cinco perguntas?"),
+            chama("transferir_para_entrevista_credito", {}, "c4"),
+            fala("Qual é a sua renda mensal?"),
+        ]
+        # Cada campo exige um turno: o agente pergunta, o cliente responde, aí registra.
+        campos = [
+            ("renda_mensal", "8000", "Qual é o total de despesas mensais?"),
+            ("despesas_mensais", "3000", "Qual é o seu vínculo de trabalho?"),
+            ("tipo_emprego", "formal", "Quantos dependentes você tem?"),
+            ("num_dependentes", "0", "Você tem dívidas em aberto?"),
+        ]
+        for i, (campo, valor, proxima) in enumerate(campos, start=5):
+            respostas.append(
+                chama("registrar_resposta_entrevista", {"campo": campo, "valor": valor}, f"c{i}")
+            )
+            respostas.append(fala(proxima))
+        respostas += [
+            chama("registrar_resposta_entrevista", {"campo": "tem_dividas", "valor": "não"}, "c9"),
+            chama("finalizar_entrevista", {}, "c10"),
+            chama("transferir_para_credito", {}, "c11"),
+            chama("solicitar_aumento_limite", {"novo_limite": "6000"}, "c12"),
+            fala("Boa notícia: seu pedido de R$ 6.000,00 foi aprovado."),
+        ]
+
+        grafo = build_graph(llm=roteiro(*respostas))
+        conversar(grafo, "oi")
+        conversar(grafo, "quero 6000 de limite", primeira=False)
+        conversar(grafo, "aceito a entrevista", primeira=False)
+        for resposta_do_cliente in ["8000", "3000", "formal", "0"]:
+            conversar(grafo, resposta_do_cliente, primeira=False)
+
+        estado = conversar(grafo, "não tenho dívidas", primeira=False)
+
+        assert estado["cliente"].score_atual == 580
+        assert estado["entrevistas_realizadas"] == 1
+        assert estado["solicitacao_atual"].status_pedido.value == "aprovado"
+        assert estado["agente_atual"] is Agente.CREDITO
+        assert orfas(estado) == []
+
+    def test_entrevista_nao_registra_campo_que_nao_perguntou(self) -> None:
+        """O bug do `conversa_real.md`: renda tirada do histórico, sem pergunta nenhuma."""
         grafo = build_graph(
             llm=roteiro(
                 chama("autenticar_cliente", {"cpf": CPF, "data_nascimento": NASCIMENTO}, "c1"),
                 fala("Olá, Beatriz!"),
+                # A entrevista só é alcançável a partir do crédito.
                 chama("transferir_para_credito", {}, "c2"),
                 chama("solicitar_aumento_limite", {"novo_limite": "6000"}, "c3"),
-                fala("Não consegui aprovar esse valor. Quer responder cinco perguntas?"),
+                fala("Não consegui aprovar. Quer responder cinco perguntas?"),
                 chama("transferir_para_entrevista_credito", {}, "c4"),
+                # No mesmo turno do handoff, tenta preencher a renda com o valor do pedido.
                 chama(
                     "registrar_resposta_entrevista",
-                    {"campo": "renda_mensal", "valor": "8000"},
+                    {"campo": "renda_mensal", "valor": "6000"},
                     "c5",
                 ),
-                chama(
-                    "registrar_resposta_entrevista",
-                    {"campo": "despesas_mensais", "valor": "3000"},
-                    "c6",
-                ),
-                chama(
-                    "registrar_resposta_entrevista",
-                    {"campo": "tipo_emprego", "valor": "formal"},
-                    "c7",
-                ),
-                chama(
-                    "registrar_resposta_entrevista",
-                    {"campo": "num_dependentes", "valor": "0"},
-                    "c8",
-                ),
-                chama(
-                    "registrar_resposta_entrevista", {"campo": "tem_dividas", "valor": "não"}, "c9"
-                ),
-                chama("finalizar_entrevista", {}, "c10"),
-                chama("transferir_para_credito", {}, "c11"),
-                chama("solicitar_aumento_limite", {"novo_limite": "6000"}, "c12"),
-                fala("Boa notícia: seu limite de R$ 6.000,00 foi aprovado."),
+                fala("Qual é a sua renda mensal? Informe em números."),
             )
         )
         conversar(grafo, "oi")
@@ -216,10 +244,9 @@ class TestCicloCreditoEntrevista:
 
         estado = conversar(grafo, "aceito a entrevista", primeira=False)
 
-        assert estado["cliente"].score_atual == 580
-        assert estado["entrevistas_realizadas"] == 1
-        assert estado["solicitacao_atual"].status_pedido.value == "aprovado"
-        assert estado["agente_atual"] is Agente.CREDITO
+        assert estado["entrevista_slots"] == {}
+        assert estado["entrevista_campo_perguntado"] == "renda_mensal"
+        assert estado["messages"][-1].content.startswith("Qual é a sua renda")
         assert orfas(estado) == []
 
     def test_teto_de_entrevistas_redireciona_para_credito(self) -> None:

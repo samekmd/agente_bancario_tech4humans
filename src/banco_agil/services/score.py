@@ -6,7 +6,10 @@ entrevista; quem transforma isso em número é este módulo.
 
 from banco_agil.domain.enums import TipoEmprego
 from banco_agil.domain.models import DadosEntrevista
+from banco_agil.utils.logging import get_logger
 from banco_agil.utils.validators import arredondar
+
+logger = get_logger("services.score")
 
 SCORE_MINIMO = 0
 SCORE_MAXIMO = 1000
@@ -42,10 +45,24 @@ def calcular_score(dados: DadosEntrevista) -> int:
     `score = (renda / (despesas + 1)) * 30 + peso_emprego + peso_dependentes + peso_dividas`,
     arredondado para inteiro e truncado ao intervalo 0–1000.
     """
-    bruto = (
-        (dados.renda_mensal / (dados.despesas_mensais + 1)) * FATOR_RENDA
-        + PESO_EMPREGO[dados.tipo_emprego]
-        + peso_dependentes(dados.num_dependentes)
-        + peso_dividas(dados.tem_dividas)
+    parcela_renda = (dados.renda_mensal / (dados.despesas_mensais + 1)) * FATOR_RENDA
+    parcela_emprego = PESO_EMPREGO[dados.tipo_emprego]
+    parcela_dependentes = peso_dependentes(dados.num_dependentes)
+    parcela_dividas = peso_dividas(dados.tem_dividas)
+
+    bruto = parcela_renda + parcela_emprego + parcela_dependentes + parcela_dividas
+    final = max(SCORE_MINIMO, min(SCORE_MAXIMO, int(arredondar(bruto, casas=0))))
+
+    logger.info(
+        "score: entrada=%s | renda=%.2f + emprego=%d + dependentes=%d + dividas=%d "
+        "= bruto %.2f -> final %d%s",
+        dados.model_dump(mode="json"),
+        parcela_renda,
+        parcela_emprego,
+        parcela_dependentes,
+        parcela_dividas,
+        bruto,
+        final,
+        " (truncado)" if final != round(bruto) else "",
     )
-    return max(SCORE_MINIMO, min(SCORE_MAXIMO, int(arredondar(bruto, casas=0))))
+    return final

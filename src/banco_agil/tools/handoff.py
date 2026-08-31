@@ -18,10 +18,14 @@ from langgraph.types import Command
 
 from banco_agil.domain.enums import Agente
 from banco_agil.tools.base import responder, sucesso
+from banco_agil.utils.logging import get_logger
+
+logger = get_logger("tools.handoff")
 
 
 def _transferir(destino: Agente, tool_call_id: str) -> Command:
     """Move o controle para outro agente, sem interromper a execução do grafo."""
+    logger.info("handoff pedido para: %s", destino.value)
     payload = sucesso(agente_atual=destino, mensagem="Controle transferido.")
     return responder(payload, tool_call_id, agente_atual=destino)
 
