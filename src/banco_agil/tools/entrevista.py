@@ -12,13 +12,14 @@ from banco_agil.services.entrevista import (
     PERGUNTAS,
     concluir_entrevista,
     conferir_pergunta_feita,
+    conferir_valor_do_cliente,
     proximo_campo,
     registrar_slot,
 )
 from banco_agil.services.limite import valor_para_nova_tentativa
-from banco_agil.state import AtendimentoState
+from banco_agil.state import AtendimentoState, ultima_fala_do_cliente
 from banco_agil.tools.base import falha, falha_de, responder, sucesso
-from banco_agil.utils.exceptions import RespostaNaoSolicitadaError
+from banco_agil.utils.exceptions import RespostaNaoSolicitadaError, ValorNaoInformadoError
 from banco_agil.utils.logging import get_logger, mascarar_cpf
 
 logger = get_logger("tools.entrevista")
@@ -51,7 +52,9 @@ def registrar_resposta_entrevista(
     try:
         conferir_pergunta_feita(campo, perguntado)
         slots = registrar_slot(slots_atuais, campo, valor)
-    except RespostaNaoSolicitadaError as erro:
+        # O que se grava tem que estar na fala do cliente: "não sei" não é uma renda.
+        conferir_valor_do_cliente(campo, slots[campo], ultima_fala_do_cliente(state))
+    except (RespostaNaoSolicitadaError, ValorNaoInformadoError) as erro:
         payload = falha_de(erro, "registrar_resposta_entrevista")
         payload["campo_esperado"] = proximo_campo(slots_atuais)
         return responder(payload, tool_call_id)

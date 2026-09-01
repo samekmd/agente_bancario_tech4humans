@@ -3,6 +3,7 @@
 A decisão de aprovar ou rejeitar um aumento nunca fica com o LLM — sai daqui.
 """
 
+import re
 from collections.abc import Sequence
 from datetime import datetime
 
@@ -11,10 +12,19 @@ from banco_agil.domain.models import Cliente, FaixaLimite, ResultadoAvaliacao, S
 from banco_agil.observability.tracing import TASK, span
 from banco_agil.repositories.score_limite import ScoreLimiteRepository
 from banco_agil.repositories.solicitacoes import SolicitacoesRepository
-from banco_agil.utils.exceptions import DadosIndisponiveisError
+from banco_agil.utils.exceptions import DadosIndisponiveisError, ValorNaoInformadoError
 from banco_agil.utils.logging import dump_seguro, get_logger, mascarar_cpf
+from banco_agil.utils.validators import validar_valor_monetario
 
 logger = get_logger("services.limite")
+
+# Um número possivelmente monetário no meio de uma frase: dígitos com separadores.
+_NUMERO_NO_TEXTO = re.compile(r"\d[\d.,]*")
+
+VALOR_NAO_INFORMADO = (
+    "O cliente não disse de quanto quer o limite. Pergunte o valor em números antes "
+    "de registrar o pedido."
+)
 
 
 def faixa_para_score(score: int, faixas: Sequence[FaixaLimite]) -> FaixaLimite:
@@ -154,3 +164,48 @@ def processar_pedido_aumento(
     )
     logger.info("[3/3] linha atualizada para %s", decidido.status_pedido.value)
     return decidido, avaliacao
+
+
+def valores_citados(textos: Sequence[str]) -> set[float]:
+    """Valores monetários que aparecem no que o cliente escreveu.
+
+    Só o que passa por `validar_valor_monetario` entra: um token ambíguo é descartado aqui
+    do mesmo jeito que seria recusado ao virar pedido.
+    """
+    encontrados: set[float] = set()
+    for texto in textos:
+        for token in _NUMERO_NO_TEXTO.findall(texto or ""):
+            try:
+                encontrados.add(validar_valor_monetario(token))
+            except Exception:  # noqa: BLE001 - token que não é valor apenas não conta
+                continue
+    return encontrados
+
+
+def conferir_valor_do_cliente(
+    valor: float,
+    textos_do_cliente: Sequence[str],
+    valor_pendente: float | None = None,
+) -> None:
+    """Garante que o valor pedido saiu do cliente, e não da imaginação do modelo.
+
+    Aceita duas procedências: o valor aparece em alguma mensagem que o cliente digitou, ou
+    é a reoferta que ele acabou de confirmar (`limite_pendente_reavaliacao`). Fora disso,
+    levanta `ValorNaoInformadoError`.
+
+    Existe porque um modelo pediu R$ 25.000 para um cliente que só havia dito "quero
+    aumentar este limite" — o número saiu do meio do caminho entre o limite atual e o teto,
+    ambos ditos pelo próprio sistema.
+    """
+    if valor_pendente is not None and valor == valor_pendente:
+        return
+    if valor in valores_citados(textos_do_cliente):
+        return
+
+    logger.warning(
+        "valor R$ %.2f não foi dito pelo cliente; citados: %s, pendente: %s",
+        valor,
+        sorted(valores_citados(textos_do_cliente)),
+        valor_pendente,
+    )
+    raise ValorNaoInformadoError(VALOR_NAO_INFORMADO)

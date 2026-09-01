@@ -17,6 +17,7 @@ from langgraph.graph.state import CompiledStateGraph
 from banco_agil.agents import cambio, credito, entrevista, triagem
 from banco_agil.config import get_settings
 from banco_agil.domain.enums import Agente
+from banco_agil.llm import llm_para
 from banco_agil.routing import NO_GUARDA, aplicar_guarda, rota_apos, rota_apos_guarda, rota_inicial
 from banco_agil.state import AtendimentoState
 
@@ -49,13 +50,13 @@ def build_graph(
 ) -> CompiledStateGraph:
     """Monta e compila o grafo do atendimento.
 
-    `llm` permite injetar um modelo falso nos testes; em produção cada agente resolve o
-    seu próprio a partir da configuração.
+    `llm` sobrepõe **todos** os agentes — é como os testes injetam um modelo falso.
+    Com `None`, cada agente recebe o modelo do seu perfil (`PERFIL_POR_AGENTE`).
     """
     grafo = StateGraph(AtendimentoState)
 
     for agente, construir in CONSTRUTORES.items():
-        grafo.add_node(agente.value, construir(llm=llm))
+        grafo.add_node(agente.value, construir(llm=llm or llm_para(agente)))
     grafo.add_node(NO_GUARDA, aplicar_guarda)
 
     nos_de_agente = {agente.value: agente.value for agente in CONSTRUTORES}

@@ -7,9 +7,14 @@ from langgraph.prebuilt import InjectedState
 from langgraph.types import Command
 
 from banco_agil.observability.tags import marcar_desfecho_pedido
-from banco_agil.services.limite import limite_maximo_permitido, processar_pedido_aumento
-from banco_agil.state import AtendimentoState
+from banco_agil.services.limite import (
+    conferir_valor_do_cliente,
+    limite_maximo_permitido,
+    processar_pedido_aumento,
+)
+from banco_agil.state import AtendimentoState, falas_do_cliente
 from banco_agil.tools.base import falha, falha_de, responder, sucesso
+from banco_agil.utils.exceptions import ValorNaoInformadoError
 from banco_agil.utils.logging import dump_seguro, get_logger, mascarar_cpf
 from banco_agil.utils.validators import validar_valor_monetario
 
@@ -80,7 +85,18 @@ def solicitar_aumento_limite(
     try:
         valor = validar_valor_monetario(novo_limite)
         logger.debug("valor solicitado normalizado: %r -> %.2f", novo_limite, valor)
+        # O valor precisa ter saído do cliente: um modelo já pediu R$ 25.000 para quem só
+        # havia dito "quero aumentar este limite".
+        conferir_valor_do_cliente(
+            valor,
+            falas_do_cliente(state),
+            state.get("limite_pendente_reavaliacao"),
+        )
         pedido, avaliacao = processar_pedido_aumento(cliente, valor)
+    except ValorNaoInformadoError as erro:
+        payload = falha_de(erro, "solicitar_aumento_limite")
+        payload["precisa_perguntar"] = True
+        return responder(payload, tool_call_id)
     except Exception as erro:  # noqa: BLE001 - nenhuma tool levanta exceção para o grafo
         return responder(falha_de(erro, "solicitar_aumento_limite"), tool_call_id)
 

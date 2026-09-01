@@ -3,6 +3,8 @@
 install:
 	uv sync --all-extras
 
+# Suba o `make mlflow` antes para os traces serem gravados desde a primeira mensagem.
+# Se ele subir depois, a aplicação se reconecta sozinha em até 30s, sem reiniciar.
 run:
 	uv run streamlit run app.py
 

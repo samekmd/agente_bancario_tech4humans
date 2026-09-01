@@ -9,7 +9,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 import pytest
-from langchain_core.messages import ToolMessage
+from langchain_core.messages import HumanMessage, ToolMessage
 from langgraph.types import Command
 
 from banco_agil.domain.enums import Agente, MotivoFalhaAuth, StatusPedido, TipoEmprego
@@ -64,8 +64,16 @@ def payload_de(comando: Command) -> dict[str, Any]:
     return json.loads(mensagem.content)
 
 
-def estado(**campos: Any) -> dict[str, Any]:
-    return {**estado_inicial(), **campos}
+def estado(disse: str = "", **campos: Any) -> dict[str, Any]:
+    """Estado de teste. `disse` é o que o cliente escreveu — as tools conferem isso.
+
+    Sem uma fala do cliente contendo o valor, `conferir_valor_do_cliente` recusa: é
+    justamente a guarda contra o modelo inventar número.
+    """
+    base = {**estado_inicial(), **campos}
+    if disse:
+        base["messages"] = [*base.get("messages", []), HumanMessage(content=disse)]
+    return base
 
 
 def chamar(ferramenta, **kwargs: Any) -> Command:
@@ -254,7 +262,9 @@ class TestCredito:
         )
 
         comando = chamar(
-            solicitar_aumento_limite, novo_limite="R$ 6.000,00", state=estado(cliente=CLIENTE)
+            solicitar_aumento_limite,
+            novo_limite="R$ 6.000,00",
+            state=estado("quero 6000 de limite", cliente=CLIENTE),
         )
         payload = payload_de(comando)
 
@@ -286,7 +296,11 @@ class TestCredito:
         )
 
         payload = payload_de(
-            chamar(solicitar_aumento_limite, novo_limite="6000", state=estado(cliente=CLIENTE))
+            chamar(
+                solicitar_aumento_limite,
+                novo_limite="6000",
+                state=estado("quero 6000", cliente=CLIENTE),
+            )
         )
 
         assert payload["aprovado"] is True
@@ -317,7 +331,7 @@ class TestCredito:
         comando = chamar(
             solicitar_aumento_limite,
             novo_limite="6000",
-            state=estado(cliente=CLIENTE, limite_pendente_reavaliacao=6000.0),
+            state=estado("sim", cliente=CLIENTE, limite_pendente_reavaliacao=6000.0),
         )
 
         assert comando.update["limite_pendente_reavaliacao"] is None
@@ -329,7 +343,11 @@ class TestCredito:
         monkeypatch.setattr("banco_agil.tools.credito.processar_pedido_aumento", nao_deveria)
 
         payload = payload_de(
-            chamar(solicitar_aumento_limite, novo_limite="bastante", state=estado(cliente=CLIENTE))
+            chamar(
+                solicitar_aumento_limite,
+                novo_limite="bastante",
+                state=estado("quero bastante", cliente=CLIENTE),
+            )
         )
 
         assert payload["ok"] is False
@@ -341,7 +359,7 @@ class TestEntrevista:
             registrar_resposta_entrevista,
             campo="renda_mensal",
             valor="8000",
-            state=estado(entrevista_campo_perguntado="renda_mensal"),
+            state=estado("8000", entrevista_campo_perguntado="renda_mensal"),
         )
         payload = payload_de(comando)
 
@@ -392,7 +410,9 @@ class TestEntrevista:
                 registrar_resposta_entrevista,
                 campo="tem_dividas",
                 valor="não",
-                state=estado(entrevista_slots=slots, entrevista_campo_perguntado="tem_dividas"),
+                state=estado(
+                    "não", entrevista_slots=slots, entrevista_campo_perguntado="tem_dividas"
+                ),
             )
         )
 

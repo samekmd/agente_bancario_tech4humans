@@ -2,6 +2,7 @@
 
 from typing import Annotated, Any, TypedDict
 
+from langchain_core.messages import HumanMessage
 from langgraph.graph.message import add_messages
 
 from banco_agil.domain.enums import Agente
@@ -58,3 +59,19 @@ def estado_inicial() -> AtendimentoState:
         encerrado=False,
         ultimo_erro=None,
     )
+
+
+def falas_do_cliente(state: AtendimentoState) -> list[str]:
+    """Tudo o que o cliente escreveu nesta conversa, na ordem.
+
+    Só `HumanMessage`: o que o agente ou uma tool disse não conta como informação dada pelo
+    cliente. É essa distinção que impede um valor citado pelo próprio sistema — o limite
+    atual, o teto da faixa — de ser tratado como pedido do cliente.
+    """
+    return [str(m.content) for m in state.get("messages", []) if isinstance(m, HumanMessage)]
+
+
+def ultima_fala_do_cliente(state: AtendimentoState) -> str:
+    """A última mensagem do cliente, ou vazio se ele ainda não falou."""
+    falas = falas_do_cliente(state)
+    return falas[-1] if falas else ""

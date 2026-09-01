@@ -23,13 +23,19 @@ class Settings(BaseSettings):
 
     # Provedor de LLM
     groq_api_key: SecretStr
-    modelo_dialogo: str = "openai/gpt-oss-20b"  # "qwen/qwen3.6-27b"
-    modelo_extracao: str = "openai/gpt-oss-20b"  # "qwen/qwen3.6-27b"
+    # Dois eixos independentes, combinados por `PERFIL_POR_AGENTE` em llm.py: qual modelo
+    # (barato ou robusto) e qual temperatura (diálogo ou extração). Um agente que conversa
+    # pode precisar do modelo robusto sem precisar de temperatura zero.
+    modelo_barato: str = "openai/gpt-oss-20b"
+    modelo_robusto: str = "qwen/qwen3.6-27b"
     temperatura_dialogo: float = 0.3
     temperatura_extracao: float = 0.0
     # Teto de geração por resposta. Folgado para qualquer resposta legítima somada ao
     # raciocínio interno, curto o bastante para interromper repetição degenerada.
     max_tokens_resposta: int = 1024
+    # A família gpt-oss às vezes emite o cabeçalho harmony da tool call fora de ordem
+    # e o Groq devolve 400 `tool_use_failed`. É estocástico: repetir resolve.
+    llm_max_tentativas_formato: int = 2
 
     # Parâmetros de negócio
     max_tentativas_auth: int = 3

@@ -3,13 +3,21 @@
 import streamlit as st
 from pydantic import ValidationError
 
-from ui.session import enviar_mensagem, iniciar_sessao, obter_grafo, reiniciar_sessao
+from ui.session import (
+    enviar_mensagem,
+    iniciar_sessao,
+    observabilidade_ativa,
+    obter_grafo,
+    reiniciar_sessao,
+)
 
 TITULO = "Banco Ágil"
 SUBTITULO = "Atendimento virtual"
 SAUDACAO = "Olá! Sou o assistente do Banco Ágil. Como posso ajudar você hoje?"
 PLACEHOLDER = "Digite sua mensagem..."
 AVISO_ENCERRADO = "Este atendimento foi encerrado."
+TRACING_ATIVO = "Observabilidade: gravando no MLflow."
+TRACING_DESLIGADO = "Observabilidade: desligada. Rode `make mlflow` para gravar os traces."
 
 AJUDA_CONFIG = """
 **Configuração incompleta.**
@@ -40,6 +48,8 @@ def _barra_lateral() -> None:
         if st.button("Novo atendimento", use_container_width=True):
             reiniciar_sessao()
             st.rerun()
+        st.divider()
+        st.caption(TRACING_ATIVO if observabilidade_ativa() else TRACING_DESLIGADO)
 
 
 def _historico() -> None:

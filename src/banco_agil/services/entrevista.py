@@ -12,7 +12,11 @@ from banco_agil.domain.enums import TipoEmprego
 from banco_agil.domain.models import Cliente, DadosEntrevista
 from banco_agil.repositories.clientes import ClientesRepository
 from banco_agil.services.score import calcular_score
-from banco_agil.utils.exceptions import EntradaInvalidaError, RespostaNaoSolicitadaError
+from banco_agil.utils.exceptions import (
+    EntradaInvalidaError,
+    RespostaNaoSolicitadaError,
+    ValorNaoInformadoError,
+)
 from banco_agil.utils.logging import get_logger, mascarar_cpf
 from banco_agil.utils.validators import validar_valor_monetario
 
@@ -62,8 +66,18 @@ NUMERO_ILEGIVEL = (
     "Não entendi o número de dependentes. Responda com um número, por exemplo 0, 1 ou 2."
 )
 
+# Um número no meio da frase: o cliente responde "ganho 8000 por mês", não só "8000".
+_NUMERO_NO_TEXTO = re.compile(r"\d[\d.,]*")
+
+VALOR_NAO_DITO = "O cliente não deu essa resposta. Pergunte de novo e registre o que ele responder."
+
 _AFIRMATIVOS = {"sim", "s", "true", "verdadeiro", "tenho", "possuo", "1"}
-_NEGATIVOS = {"nao", "n", "false", "falso", "nenhuma", "nenhum", "0"}
+_NEGATIVOS = {"nao", "n", "false", "falso", "nenhuma", "nenhum", "0", "nao tenho", "nao possuo"}
+
+# Substantivo do assunto, que acompanha a resposta sem mudá-la: "não tenho dívidas" é
+# a mesma resposta que "não". Só o substantivo sai — o verbo não, porque "tenho" e
+# "não tenho" são respostas opostas.
+_DECORACAO_DIVIDAS = re.compile(r"em aberto|aberto|dividas|divida|no momento|atualmente|hoje")
 
 _EMPREGOS: dict[str, TipoEmprego] = {
     "formal": TipoEmprego.FORMAL,
@@ -166,7 +180,7 @@ def normalizar_valor(campo: str, valor: ValorBruto) -> ValorSlot:
     if isinstance(valor, bool):
         logger.info("campo tem_dividas já veio tipado: %s", valor)
         return valor
-    texto = _normalizar_texto(str(valor))
+    texto = " ".join(_DECORACAO_DIVIDAS.sub("", _normalizar_texto(str(valor))).split())
     if texto in _AFIRMATIVOS:
         logger.info("campo tem_dividas normalizado: %r -> True", valor)
         return True
@@ -193,6 +207,46 @@ def conferir_pergunta_feita(campo: str, campo_perguntado: str | None) -> None:
             f"A pergunta feita ao cliente foi sobre {campo_perguntado}, não {campo}. "
             "Registre a resposta do campo perguntado."
         )
+
+
+def _candidatos_do_texto(campo: str, texto: str) -> list[ValorBruto]:
+    """Pedaços da fala do cliente que podem ser a resposta daquele campo.
+
+    Dinheiro e contagem saem de tokens numéricos, porque o cliente responde "ganho 8000
+    por mês" e não só "8000".
+
+    Campos de resposta fechada usam **a mensagem inteira**, nunca palavra por palavra: em
+    "não sei", a palavra "não" isolada viraria "não tenho dívidas", registrando como
+    resposta o que na verdade foi uma recusa a responder — e valendo 200 pontos de score.
+    Aqui o cliente escolhe de um menu, então a resposta esperada é o item do menu; qualquer
+    outra coisa faz o agente perguntar de novo, que é o lado seguro do erro.
+    """
+    if campo in ("renda_mensal", "despesas_mensais", "num_dependentes"):
+        return list(_NUMERO_NO_TEXTO.findall(texto or ""))
+    return [texto or ""]
+
+
+def conferir_valor_do_cliente(campo: str, valor_registrado: ValorSlot, texto: str) -> None:
+    """Garante que a resposta registrada está na fala do cliente.
+
+    `conferir_pergunta_feita` garante *qual* campo se registra; esta garante *o que* se
+    registra. Sem ela, o agente pergunta a renda, o cliente responde "não lembro", e o
+    modelo grava um número plausível que vira score na base.
+    """
+    for candidato in _candidatos_do_texto(campo, texto):
+        try:
+            if normalizar_valor(campo, candidato) == valor_registrado:
+                return
+        except EntradaInvalidaError:
+            continue
+
+    logger.warning(
+        "valor %r do campo %s não está na fala do cliente: %r",
+        valor_registrado,
+        campo,
+        texto,
+    )
+    raise ValorNaoInformadoError(VALOR_NAO_DITO)
 
 
 def registrar_slot(slots: Slots, campo: str, valor: ValorBruto) -> dict[str, ValorSlot]:

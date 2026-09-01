@@ -27,7 +27,8 @@ def tracing_desligado(monkeypatch: pytest.MonkeyPatch) -> Any:
 
     uri_original = mlflow.get_tracking_uri()
     monkeypatch.setattr(setup, "_ativo", False)
-    monkeypatch.setattr(setup, "_configurado", True)
+    monkeypatch.setattr(setup, "_resolvido", True)
+    monkeypatch.setattr(setup, "_ultima_tentativa", None)
     yield
     mlflow.langchain.autolog(disable=True)
     mlflow.set_tracking_uri(uri_original)
@@ -138,8 +139,9 @@ class TestConfigurarMlflow:
     def test_desligado_por_configuracao_devolve_falso(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        monkeypatch.setattr(setup, "_configurado", False)
+        monkeypatch.setattr(setup, "_resolvido", False)
         monkeypatch.setattr(setup, "_ativo", False)
+        monkeypatch.setattr(setup, "_ultima_tentativa", None)
         monkeypatch.setenv("MLFLOW_HABILITADO", "false")
 
         from banco_agil.config import get_settings
@@ -153,8 +155,9 @@ class TestConfigurarMlflow:
 
     def test_servidor_inalcancavel_nao_levanta(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """O atendimento tem que seguir igual com o servidor do MLflow fora do ar."""
-        monkeypatch.setattr(setup, "_configurado", False)
+        monkeypatch.setattr(setup, "_resolvido", False)
         monkeypatch.setattr(setup, "_ativo", False)
+        monkeypatch.setattr(setup, "_ultima_tentativa", None)
 
         import mlflow
 
@@ -168,8 +171,9 @@ class TestConfigurarMlflow:
 
     def test_e_idempotente(self, monkeypatch: pytest.MonkeyPatch) -> None:
         chamadas: list[int] = []
-        monkeypatch.setattr(setup, "_configurado", False)
+        monkeypatch.setattr(setup, "_resolvido", False)
         monkeypatch.setattr(setup, "_ativo", False)
+        monkeypatch.setattr(setup, "_ultima_tentativa", None)
 
         import mlflow
 
@@ -182,3 +186,90 @@ class TestConfigurarMlflow:
         setup.configurar_mlflow()
 
         assert len(chamadas) == 1
+
+
+class TestReconexao:
+    """O defeito que deixou uma conversa inteira sem trace: a falha ficava definitiva.
+
+    O app subiu segundos antes do servidor MLflow, marcou indisponível, e não tentou mais
+    — nem quando o servidor entrou no ar minutos depois.
+    """
+
+    @pytest.fixture(autouse=True)
+    def estado_limpo(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(setup, "_resolvido", False)
+        monkeypatch.setattr(setup, "_ativo", False)
+        monkeypatch.setattr(setup, "_ultima_tentativa", None)
+
+    def _quebrar_mlflow(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        import mlflow
+
+        def explode(*a: Any, **k: Any) -> None:
+            raise RuntimeError("Connection refused")
+
+        monkeypatch.setattr(mlflow, "set_experiment", explode)
+
+    def _consertar_mlflow(self, monkeypatch: pytest.MonkeyPatch) -> list[int]:
+        chamadas: list[int] = []
+        import mlflow
+
+        monkeypatch.setattr(mlflow, "set_tracking_uri", lambda *a, **k: None)
+        monkeypatch.setattr(mlflow, "set_experiment", lambda *a, **k: chamadas.append(1))
+        monkeypatch.setattr(mlflow.langchain, "autolog", lambda *a, **k: None)
+        return chamadas
+
+    def test_servidor_que_sobe_depois_e_reconectado(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        relogio = iter([0.0, 100.0])
+        self._quebrar_mlflow(monkeypatch)
+
+        assert setup.configurar_mlflow(agora=lambda: next(relogio)) is False
+
+        chamadas = self._consertar_mlflow(monkeypatch)
+        assert setup.configurar_mlflow(agora=lambda: next(relogio)) is True
+        assert setup.tracing_ativo() is True
+        assert chamadas == [1]
+
+    def test_nao_retenta_dentro_do_cooldown(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Servidor fora do ar não pode custar o timeout a cada mensagem do cliente."""
+        self._quebrar_mlflow(monkeypatch)
+        assert setup.configurar_mlflow(agora=lambda: 0.0) is False
+
+        # Registra em vez de levantar: a fixture de limpeza ainda usa `set_tracking_uri`.
+        tentativas: list[int] = []
+        import mlflow
+
+        monkeypatch.setattr(mlflow, "set_tracking_uri", lambda *a, **k: tentativas.append(1))
+        segundos_depois = setup.ESPERA_ENTRE_TENTATIVAS_S / 2
+
+        assert setup.configurar_mlflow(agora=lambda: segundos_depois) is False
+        assert tentativas == []
+
+    def test_sucesso_encerra_as_tentativas(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        chamadas = self._consertar_mlflow(monkeypatch)
+
+        setup.configurar_mlflow(agora=lambda: 0.0)
+        setup.configurar_mlflow(agora=lambda: 1000.0)
+
+        assert chamadas == [1]
+
+    def test_desligado_por_configuracao_nao_fica_retentando(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Diferente de falha de conexão: é decisão explícita, não há o que retentar."""
+        monkeypatch.setenv("MLFLOW_HABILITADO", "false")
+
+        from banco_agil.config import get_settings
+
+        get_settings.cache_clear()
+        try:
+            assert setup.configurar_mlflow(agora=lambda: 0.0) is False
+
+            tentativas: list[int] = []
+            import mlflow
+
+            monkeypatch.setattr(mlflow, "set_tracking_uri", lambda *a, **k: tentativas.append(1))
+
+            assert setup.configurar_mlflow(agora=lambda: 10_000.0) is False
+            assert tentativas == []
+        finally:
+            get_settings.cache_clear()

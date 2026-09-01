@@ -11,12 +11,14 @@ from banco_agil.repositories.score_limite import ScoreLimiteRepository
 from banco_agil.repositories.solicitacoes import SolicitacoesRepository
 from banco_agil.services.limite import (
     avaliar_aumento,
+    conferir_valor_do_cliente,
     faixa_para_score,
     limite_maximo_permitido,
     processar_pedido_aumento,
     valor_para_nova_tentativa,
+    valores_citados,
 )
-from banco_agil.utils.exceptions import DadosIndisponiveisError
+from banco_agil.utils.exceptions import DadosIndisponiveisError, ValorNaoInformadoError
 
 pytestmark = pytest.mark.unit
 
@@ -202,3 +204,41 @@ class TestValorParaNovaTentativa:
 
     def test_sem_pedido_nao_ha_o_que_reoferecer(self) -> None:
         assert valor_para_nova_tentativa(None) is None
+
+
+class TestValorPrecisaVirDoCliente:
+    """O caso real: cliente disse só "Quero aumentar este limite" e o modelo pediu 25.000."""
+
+    @pytest.mark.parametrize(
+        ("texto", "esperado"),
+        [
+            ("quero 8000", {8000.0}),
+            ("quero R$ 8.000,00", {8000.0}),
+            ("de 20000 para 25000", {20000.0, 25000.0}),
+            ("Quero aumentar este limite", set()),
+            ("quero o dobro", set()),
+            ("", set()),
+        ],
+    )
+    def test_extrai_so_o_que_o_cliente_escreveu(self, texto: str, esperado: set) -> None:
+        assert valores_citados([texto]) == esperado
+
+    def test_aceita_valor_que_o_cliente_disse(self) -> None:
+        assert conferir_valor_do_cliente(8000.0, ["quero aumentar para 8000"]) is None
+
+    def test_aceita_valor_dito_em_mensagem_anterior(self) -> None:
+        """O fluxo de confirmação: "quero 8000" ... "confirma?" ... "sim"."""
+        assert conferir_valor_do_cliente(8000.0, ["quero 8000", "sim"]) is None
+
+    def test_aceita_a_reoferta_confirmada(self) -> None:
+        """Depois da entrevista o valor vem do estado, não da fala — é o fluxo do P5."""
+        assert conferir_valor_do_cliente(6000.0, ["sim"], valor_pendente=6000.0) is None
+
+    def test_recusa_valor_inventado(self) -> None:
+        with pytest.raises(ValorNaoInformadoError):
+            conferir_valor_do_cliente(25000.0, ["Quero aumentar este limite"])
+
+    def test_valor_dito_pelo_sistema_nao_conta(self) -> None:
+        """O 25.000 do caso real saiu do meio entre limite atual e teto, ambos do sistema."""
+        with pytest.raises(ValorNaoInformadoError):
+            conferir_valor_do_cliente(25000.0, ["oi", "quero aumentar este limite"])

@@ -8,7 +8,7 @@ from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from banco_agil.domain.enums import Agente
 from banco_agil.graph import build_graph, config_execucao
 from banco_agil.state import estado_inicial
-from tests.integration.conftest import chama, fala, roteiro
+from tests.integration.conftest import LLMRoteirizado, chama, fala, roteiro
 
 pytestmark = pytest.mark.integration
 
@@ -298,3 +298,136 @@ class TestEncerramento:
         estado = conversar(grafo, "ainda está aí?", primeira=False)
 
         assert estado["messages"][-1].content == "ainda está aí?"
+
+
+class TestModeloPorAgente:
+    def test_llm_injetado_sobrepoe_todos_os_agentes(self) -> None:
+        """Com dois modelos reais em jogo, a suíte precisa continuar offline.
+
+        Se `build_graph(llm=...)` deixasse de sobrepor algum nó, aquele agente tentaria
+        falar com o Groq de verdade no meio dos testes.
+        """
+        falso = roteiro(fala("resposta única"))
+
+        grafo = build_graph(llm=falso)
+
+        nos = grafo.get_graph().nodes
+        assert {"triagem", "credito", "entrevista_credito", "cambio"} <= set(nos)
+        # Uma conversa completa sem rede é a prova de que nenhum nó resolveu modelo real.
+        estado = conversar(grafo, "oi")
+        assert estado["messages"][-1].content == "resposta única"
+
+
+class TestRetryDeFormatoDeToolCall:
+    """Reprodução do erro real: o modelo erra o formato da tool call e o Groq devolve 400.
+
+    A falha acontece na chamada do LLM, antes de qualquer tool rodar — por isso o
+    tratamento de erro das tools não pega. O que salva o turno é repetir a chamada.
+    """
+
+    def test_conversa_sobrevive_a_uma_falha_de_formato(self) -> None:
+        falhas = {"restantes": 1}
+        erro_real = (
+            "Error code: 400 - Tool call validation failed: attempted to call tool "
+            "'autenticar_cliente<|channel|>commentary' which was not in request.tools "
+            "(code: tool_use_failed)"
+        )
+
+        class LLMQueFalhaUmaVez(LLMRoteirizado):
+            def _generate(self, messages, *args: Any, **kwargs: Any):  # noqa: ANN002, ANN003
+                if falhas["restantes"] > 0:
+                    falhas["restantes"] -= 1
+                    raise RuntimeError(erro_real)
+                return super()._generate(messages, *args, **kwargs)
+
+        grafo = build_graph(
+            llm=LLMQueFalhaUmaVez(
+                responses=[
+                    chama("autenticar_cliente", {"cpf": CPF, "data_nascimento": NASCIMENTO}, "c1"),
+                    fala("Olá, Beatriz! Como posso ajudar?"),
+                ]
+            )
+        )
+
+        estado = conversar(grafo, f"oi, cpf {CPF}, nasci em {NASCIMENTO}")
+
+        assert falhas["restantes"] == 0, "a falha precisa ter sido injetada de fato"
+        assert estado["autenticado"] is True
+        assert estado["messages"][-1].content == "Olá, Beatriz! Como posso ajudar?"
+        assert orfas(estado) == []
+
+    def test_erro_nao_retentavel_nao_e_repetido(self) -> None:
+        """Chave inválida não pode custar três tentativas: o cliente esperaria o triplo."""
+        tentativas: list[int] = []
+
+        class LLMComChaveInvalida(LLMRoteirizado):
+            def _generate(self, messages, *args: Any, **kwargs: Any):  # noqa: ANN002, ANN003
+                tentativas.append(1)
+                raise RuntimeError("Error code: 401 - Invalid API Key")
+
+        grafo = build_graph(llm=LLMComChaveInvalida(responses=[fala("nunca usado")]))
+
+        with pytest.raises(RuntimeError, match="Invalid API Key"):
+            conversar(grafo, "oi")
+
+        assert len(tentativas) == 1
+
+
+class TestValorInventadoPeloModelo:
+    """Reprodução de `conversa_real_erro_solicatao_credito.md`.
+
+    O cliente disse só "Quero aumentar este limite". O modelo pediu R$ 25.000 — número que
+    ficava no meio entre o limite atual (20.000) e o teto (30.000), ambos ditos pelo
+    próprio sistema. O pedido foi gravado e aprovado.
+    """
+
+    # Helena tem o mesmo formato do caso real: limite 5.000, teto 15.000.
+    CPF_CLIENTE = "529.982.247-25"
+    NASCIMENTO_CLIENTE = "12/03/1985"
+
+    def test_pedido_sem_valor_do_cliente_e_recusado(self, bases_isoladas: Any) -> None:
+        grafo = build_graph(
+            llm=roteiro(
+                chama(
+                    "autenticar_cliente",
+                    {"cpf": self.CPF_CLIENTE, "data_nascimento": self.NASCIMENTO_CLIENTE},
+                    "c1",
+                ),
+                fala("Olá, Helena! Seu limite atual é R$ 5.000,00."),
+                chama("transferir_para_credito", {}, "c2"),
+                # O cliente não disse valor nenhum; o modelo inventa um.
+                chama("solicitar_aumento_limite", {"novo_limite": "10000"}, "c3"),
+                fala("De quanto você gostaria que fosse o novo limite?"),
+            )
+        )
+        conversar(grafo, f"oi, cpf {self.CPF_CLIENTE}, nasci em {self.NASCIMENTO_CLIENTE}")
+
+        estado = conversar(grafo, "Quero aumentar este limite", primeira=False)
+
+        # A tool recusou, então nada foi para o estado nem para o CSV.
+        assert estado["solicitacao_atual"] is None
+        assert not (bases_isoladas / "solicitacoes_aumento_limite.csv").exists()
+        # E o agente teve que perguntar, em vez de anunciar aprovação.
+        assert "quanto" in estado["messages"][-1].content.lower()
+
+    def test_pedido_com_valor_dito_pelo_cliente_passa(self, bases_isoladas: Any) -> None:
+        """O contraponto: quando o cliente diz o valor, o fluxo funciona como antes."""
+        grafo = build_graph(
+            llm=roteiro(
+                chama(
+                    "autenticar_cliente",
+                    {"cpf": self.CPF_CLIENTE, "data_nascimento": self.NASCIMENTO_CLIENTE},
+                    "c1",
+                ),
+                fala("Olá, Helena!"),
+                chama("transferir_para_credito", {}, "c2"),
+                chama("solicitar_aumento_limite", {"novo_limite": "10000"}, "c3"),
+                fala("Sua solicitação de R$ 10.000,00 foi aprovada."),
+            )
+        )
+        conversar(grafo, "oi")
+
+        estado = conversar(grafo, "quero aumentar para 10000", primeira=False)
+
+        assert estado["solicitacao_atual"] is not None
+        assert estado["solicitacao_atual"].novo_limite_solicitado == 10000.0

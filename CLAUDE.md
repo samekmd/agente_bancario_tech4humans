@@ -14,7 +14,7 @@ tanto quanto o código funcionando.
 
 - Python 3.11+
 - LangGraph (orquestração) + LangChain (tools, mensagens)
-- Groq como provedor de LLM (`langchain-groq`)
+- Groq como provedor de LLM (`langchain-groq`), com modelo por perfil de agente
 - Streamlit (UI de teste)
 - Pydantic v2 + pydantic-settings (modelos e config)
 - pytest, ruff
@@ -208,7 +208,11 @@ cliente com clareza e registrar o erro — nunca inventar valor.
   desligado ou fora do ar, span e tag viram no-op silencioso.
 - Nem CPF nem data de nascimento entram em log ou trace. CPF vai mascarado por
   `mascarar_cpf`; a data, junto do CPF, é credencial e não é registrada.
-- Temperatura 0 para extração e classificação; baixa (0.3) para diálogo.
+- Modelo e temperatura são eixos independentes, combinados em `PERFIL_POR_AGENTE`
+  (`llm.py`): **diálogo** (barato, 0.3) para triagem e câmbio; **diálogo robusto**
+  (robusto, 0.3) para o crédito; **extração** (robusto, 0) para a entrevista, onde a
+  fala do cliente vira dado gravado e criatividade é defeito. Crédito e entrevista usam
+  o modelo robusto por escreverem estado permanente. Agente novo sem perfil quebra a suíte.
 
 ## Testes
 

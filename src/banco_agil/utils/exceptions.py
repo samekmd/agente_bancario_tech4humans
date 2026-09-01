@@ -25,6 +25,15 @@ class RespostaNaoSolicitadaError(BancoAgilError):
     """
 
 
+class ValorNaoInformadoError(BancoAgilError):
+    """O valor a registrar não foi dito pelo cliente.
+
+    Não é entrada inválida — é entrada *inventada*. O LLM deduziu um número do limite
+    atual, do teto ou do nada, em vez de perguntar. Um sistema bancário não pode
+    registrar pedido de crédito com valor que o cliente nunca pronunciou.
+    """
+
+
 class DadosIndisponiveisError(BancoAgilError):
     """Uma base necessária não pôde ser lida (arquivo ausente ou corrompido)."""
 

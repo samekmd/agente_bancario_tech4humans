@@ -9,13 +9,18 @@ from banco_agil.services.entrevista import (
     OPCOES,
     concluir_entrevista,
     conferir_pergunta_feita,
+    conferir_valor_do_cliente,
     montar_dados,
     normalizar_valor,
     proximo_campo,
     registrar_slot,
     slots_completos,
 )
-from banco_agil.utils.exceptions import EntradaInvalidaError, RespostaNaoSolicitadaError
+from banco_agil.utils.exceptions import (
+    EntradaInvalidaError,
+    RespostaNaoSolicitadaError,
+    ValorNaoInformadoError,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -254,3 +259,44 @@ class TestConferirPerguntaFeita:
         assert conferir_pergunta_feita(campo, campo) is None
         with pytest.raises(RespostaNaoSolicitadaError):
             conferir_pergunta_feita(campo, None)
+
+
+class TestValorPrecisaEstarNaFala:
+    """`conferir_pergunta_feita` garante *qual* campo; esta, *o que* se registra."""
+
+    @pytest.mark.parametrize(
+        ("campo", "valor", "fala"),
+        [
+            ("renda_mensal", 8000.0, "ganho 8000 por mês"),
+            ("despesas_mensais", 3000.0, "R$ 3.000,00"),
+            ("tipo_emprego", TipoEmprego.FORMAL, "formal"),
+            ("num_dependentes", 2, "tenho 2 filhos"),
+            ("tem_dividas", False, "não"),
+            ("tem_dividas", False, "não tenho dívidas"),
+            ("tem_dividas", True, "sim"),
+        ],
+    )
+    def test_aceita_o_que_o_cliente_respondeu(self, campo: str, valor: object, fala: str) -> None:
+        assert conferir_valor_do_cliente(campo, valor, fala) is None
+
+    @pytest.mark.parametrize(
+        ("campo", "valor", "fala"),
+        [
+            ("renda_mensal", 5000.0, "não lembro"),
+            ("renda_mensal", 5000.0, "prefiro não informar"),
+            ("despesas_mensais", 2000.0, "não faço ideia"),
+            ("tipo_emprego", TipoEmprego.FORMAL, "sei lá"),
+            ("num_dependentes", 2, "não sei dizer"),
+            ("tem_dividas", False, "não sei"),
+            ("tem_dividas", False, "prefiro não dizer"),
+        ],
+    )
+    def test_recusa_o_que_o_cliente_nao_disse(self, campo: str, valor: object, fala: str) -> None:
+        """Recusar-se a responder não é uma resposta: o agente pergunta de novo."""
+        with pytest.raises(ValorNaoInformadoError):
+            conferir_valor_do_cliente(campo, valor, fala)
+
+    def test_nao_sei_nao_vira_ausencia_de_dividas(self) -> None:
+        """A armadilha: a palavra "não" isolada em "não sei" valeria 200 pontos de score."""
+        with pytest.raises(ValorNaoInformadoError):
+            conferir_valor_do_cliente("tem_dividas", False, "não sei")

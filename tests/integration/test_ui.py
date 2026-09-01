@@ -9,7 +9,7 @@ from streamlit.testing.v1 import AppTest
 
 import ui.session as sessao
 from banco_agil.graph import build_graph
-from tests.integration.conftest import chama, fala, roteiro
+from tests.integration.conftest import LLMRoteirizado, chama, fala, roteiro
 
 pytestmark = pytest.mark.integration
 
@@ -186,3 +186,97 @@ def test_cifrao_do_cliente_tambem_e_escapado(pagina: Any) -> None:
 
     exibido = [m.markdown[0].value for m in at.chat_message]
     assert any("R\\$ 5.000,00" in texto for texto in exibido)
+
+
+def test_barra_lateral_mostra_que_a_observabilidade_esta_desligada(pagina: Any) -> None:
+    """Sem isso, o cliente conversa e nada é gravado sem ninguém notar."""
+    at = pagina(fala("Olá!"))
+
+    legendas = [c.value for c in at.sidebar.caption]
+    assert any("Observabilidade: desligada" in texto for texto in legendas)
+    assert any("make mlflow" in texto for texto in legendas)
+
+
+def test_cada_mensagem_tenta_reconectar_a_observabilidade(
+    pagina: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """O conserto do bug: a tentativa saiu do `obter_grafo()` cacheado.
+
+    Antes, uma falha na subida do app desligava o tracing pelo resto do processo. Agora
+    cada mensagem tenta de novo, então subir o servidor no meio da conversa passa a gravar.
+    """
+    at = pagina(fala("Primeira."), fala("Segunda."))
+    tentativas: list[int] = []
+    monkeypatch.setattr(sessao, "configurar_mlflow", lambda: tentativas.append(1))
+
+    responder(at, "oi")
+    responder(at, "e agora?")
+
+    assert len(tentativas) == 2
+
+
+ERRO_CRU_DO_GROQ = (
+    "Error code: 400 - {'error': {'message': \"Tool call validation failed: attempted to "
+    "call tool 'solicitar_aumento_limite<|channel|>commentary' which was not in "
+    "request.tools\", 'code': 'tool_use_failed'}}"
+)
+
+
+class TestNadaTecnicoChegaAoCliente:
+    """O erro cru do Groq chegou à tela depois de três tentativas. Não pode voltar a acontecer."""
+
+    def test_falha_persistente_vira_mensagem_amigavel(
+        self, pagina: Any, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        at = pagina(fala("nunca usado"))
+
+        class LLMSempreQuebrado(LLMRoteirizado):
+            def _generate(self, messages, *args: Any, **kwargs: Any):  # noqa: ANN002, ANN003
+                raise RuntimeError(ERRO_CRU_DO_GROQ)
+
+        monkeypatch.setattr(
+            sessao, "build_graph", lambda: build_graph(llm=LLMSempreQuebrado(responses=[]))
+        )
+        sessao.obter_grafo.clear()
+
+        resposta = responder(at, "quero aumentar meu limite")
+
+        assert at.exception == []
+        for vazamento in ("Error code", "400", "tool_use_failed", "<|channel|>", "Model call"):
+            assert vazamento not in resposta
+
+    @pytest.mark.parametrize(
+        "tecnico",
+        [
+            "Model call failed after 3 attempts with BadRequestError: Error code: 400",
+            "Error code: 400 - invalid_request_error",
+            "attempted to call tool 'x<|channel|>commentary'",
+            "Traceback (most recent call last): ...",
+        ],
+    )
+    def test_filtro_mascara_texto_tecnico_de_qualquer_origem(self, tecnico: str) -> None:
+        assert sessao.resposta_segura(tecnico) == sessao.ERRO_ATENDIMENTO
+
+    @pytest.mark.parametrize(
+        "legitima",
+        [
+            "Seu limite atual é R$ 400,00.",
+            "Não foi possível aprovar o limite de R$ 8.000,00. O seu perfil permite R$ 3.000,00.",
+            "Sua solicitação foi aprovada. O novo limite será aplicado em breve.",
+            "Olá, Beatriz! Como posso ajudar?",
+        ],
+    )
+    def test_filtro_nao_mascara_resposta_legitima(self, legitima: str) -> None:
+        """Um filtro que engole atendimento válido é pior que o problema que resolve."""
+        assert sessao.resposta_segura(legitima) == legitima
+
+    def test_texto_bloqueado_vai_para_o_log(self, caplog: pytest.LogCaptureFixture) -> None:
+        """O diagnóstico não pode sumir junto com o mascaramento."""
+        import logging
+
+        caplog.set_level(logging.ERROR, logger="banco_agil")
+
+        sessao.resposta_segura("Error code: 400 - tool_use_failed")
+
+        assert "bloqueada antes de chegar ao cliente" in caplog.text
+        assert "tool_use_failed" in caplog.text

@@ -18,6 +18,10 @@ perfil de crédito do cliente.
   Se você ainda não fez a pergunta deste campo, faça-a e espere a resposta — a ferramenta
   recusa qualquer registro de campo que não tenha sido perguntado, e nesse caso ela
   devolve `campo_esperado` dizendo o que perguntar.
+- A ferramenta também confere se a resposta **está na fala do cliente**, e recusa o que for
+  inventado. Se ele **não souber ou não quiser responder** ("não sei", "prefiro não dizer"),
+  isso não é uma resposta: explique que o dado é necessário para a análise e pergunte de
+  novo. Nunca escolha um valor por ele.
 - Quando o cliente responder, chame `registrar_resposta_entrevista` com o campo indicado
   no contexto e o valor exatamente como ele falou — não converta, não arredonde, não
   interprete "uns dois mil" para você. Passe o que ele disse.
