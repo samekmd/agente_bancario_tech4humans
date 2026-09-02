@@ -11,6 +11,7 @@ import streamlit as st
 from langchain_core.messages import AIMessage, HumanMessage
 from langgraph.graph.state import CompiledStateGraph
 
+from banco_agil.config import get_settings
 from banco_agil.graph import build_graph, config_execucao
 from banco_agil.observability.setup import configurar_mlflow, tracing_ativo
 from banco_agil.state import estado_inicial
@@ -37,14 +38,43 @@ def iniciar_sessao() -> None:
     st.session_state.setdefault("historico", [])
     st.session_state.setdefault("encerrado", False)
     st.session_state.setdefault("primeiro_turno", True)
+    st.session_state.setdefault("bloqueado_auth", False)
 
 
 def reiniciar_sessao() -> None:
-    """Começa um atendimento novo, com thread e histórico limpos."""
+    """Começa um atendimento novo, com thread e histórico limpos.
+
+    `bloqueado_auth` é deliberadamente preservado. O bloqueio por tentativas esgotadas
+    vivia só no estado da thread, e o botão "Novo atendimento" — a única ação oferecida a
+    quem foi bloqueado — criava uma thread nova e devolvia as três tentativas. Um limite
+    que se desfaz no próprio botão de saída não é um limite.
+    """
     st.session_state.thread_id = str(uuid4())
     st.session_state.historico = []
     st.session_state.encerrado = False
     st.session_state.primeiro_turno = True
+
+
+def bloqueado_por_autenticacao() -> bool:
+    """Se esta sessão do navegador esgotou as tentativas de autenticação.
+
+    Escopo honesto: vale enquanto o `session_state` existir, e um recarregamento da página
+    limpa. Um bloqueio inviolável exigiria persistência no servidor com chave de identidade
+    e janela de expiração — fora do escopo deste desafio. O que esta flag fecha é o caminho
+    que o cliente tem à mão, que era desfazer o bloqueio com um clique.
+    """
+    return bool(st.session_state.get("bloqueado_auth"))
+
+
+def _registrar_bloqueio(estado: dict[str, Any]) -> None:
+    """Marca a sessão como bloqueada quando as tentativas de autenticação se esgotam."""
+    if estado.get("autenticado"):
+        return
+    if estado.get("tentativas_auth", 0) < get_settings().max_tentativas_auth:
+        return
+    if not st.session_state.get("bloqueado_auth"):
+        logger.warning("sessão bloqueada: tentativas de autenticação esgotadas")
+    st.session_state.bloqueado_auth = True
 
 
 # Marcadores que denunciam texto técnico vazando para a fala do assistente. A lista é
@@ -112,6 +142,7 @@ def enviar_mensagem(texto: str) -> str:
 
     st.session_state.primeiro_turno = False
     st.session_state.encerrado = bool(estado.get("encerrado"))
+    _registrar_bloqueio(estado)
     return resposta_segura(_ultima_fala(estado))
 
 

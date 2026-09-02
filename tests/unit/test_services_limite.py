@@ -11,6 +11,7 @@ from banco_agil.repositories.score_limite import ScoreLimiteRepository
 from banco_agil.repositories.solicitacoes import SolicitacoesRepository
 from banco_agil.services.limite import (
     avaliar_aumento,
+    conferir_aumento_real,
     conferir_valor_do_cliente,
     faixa_para_score,
     limite_maximo_permitido,
@@ -18,7 +19,11 @@ from banco_agil.services.limite import (
     valor_para_nova_tentativa,
     valores_citados,
 )
-from banco_agil.utils.exceptions import DadosIndisponiveisError, ValorNaoInformadoError
+from banco_agil.utils.exceptions import (
+    AumentoInvalidoError,
+    DadosIndisponiveisError,
+    ValorNaoInformadoError,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -242,3 +247,75 @@ class TestValorPrecisaVirDoCliente:
         """O 25.000 do caso real saiu do meio entre limite atual e teto, ambos do sistema."""
         with pytest.raises(ValorNaoInformadoError):
             conferir_valor_do_cliente(25000.0, ["oi", "quero aumentar este limite"])
+
+
+class TestConferirAumentoReal:
+    """Um aumento precisa aumentar.
+
+    A avaliação compara o valor pedido com o teto da faixa de score e nunca com o limite
+    que o cliente já tem. Sem esta guarda, Helena (limite R$ 5.000, score 730) pedindo
+    R$ 100 recebia "aprovado" e a linha entrava no CSV como solicitação de aumento.
+    """
+
+    def test_valor_acima_do_limite_atual_passa(self) -> None:
+        assert conferir_aumento_real(5000.01, 5000.0) is None
+
+    @pytest.mark.parametrize("pedido", [4999.99, 100.0, 0.0])
+    def test_valor_abaixo_do_limite_atual_e_recusado(self, pedido: float) -> None:
+        with pytest.raises(AumentoInvalidoError):
+            conferir_aumento_real(pedido, 5000.0)
+
+    def test_valor_igual_ao_limite_atual_e_recusado(self) -> None:
+        """Pedir o mesmo limite que já se tem não é aumento: a comparação é estrita."""
+        with pytest.raises(AumentoInvalidoError):
+            conferir_aumento_real(5000.0, 5000.0)
+
+    def test_mensagem_cita_os_dois_valores(self) -> None:
+        """O agente precisa dos números para verbalizar a pergunta ao cliente."""
+        with pytest.raises(AumentoInvalidoError) as erro:
+            conferir_aumento_real(100.0, 5000.0)
+
+        assert "5000.00" in erro.value.mensagem
+        assert "100.00" in erro.value.mensagem
+
+    def test_cliente_sem_limite_pode_pedir_qualquer_valor(self) -> None:
+        """Tiago tem limite R$ 0,00: qualquer pedido positivo é aumento genuíno."""
+        assert conferir_aumento_real(1000.0, 0.0) is None
+
+
+class TestPedidoQueNaoEAumento:
+    def test_nao_grava_nada_no_csv(
+        self,
+        repo_clientes: ClientesRepository,
+        repo_solicitacoes: SolicitacoesRepository,
+        faixas: list[FaixaLimite],
+    ) -> None:
+        """A recusa acontece antes do registro: o CSV não pode ganhar a linha."""
+        cliente = repo_clientes.buscar_por_cpf("52998224725")
+
+        with pytest.raises(AumentoInvalidoError):
+            processar_pedido_aumento(
+                cliente, 100.0, faixas=faixas, repo_solicitacoes=repo_solicitacoes
+            )
+
+        assert repo_solicitacoes.listar_por_cpf(cliente.cpf) == []
+
+    def test_tiago_pedindo_o_teto_da_faixa_continua_aprovado(
+        self,
+        repo_clientes: ClientesRepository,
+        repo_solicitacoes: SolicitacoesRepository,
+        faixas: list[FaixaLimite],
+    ) -> None:
+        """Score 0 e limite R$ 0,00: R$ 1.000 é o teto da faixa 0-299 e é aprovável.
+
+        A validação nova não pode regredir a fronteira inclusiva da tabela de faixas.
+        """
+        cliente = repo_clientes.buscar_por_cpf("45130988302")
+
+        pedido, avaliacao = processar_pedido_aumento(
+            cliente, 1000.0, faixas=faixas, repo_solicitacoes=repo_solicitacoes
+        )
+
+        assert cliente.limite_atual == 0.0
+        assert avaliacao.aprovado is True
+        assert pedido.status_pedido is StatusPedido.APROVADO

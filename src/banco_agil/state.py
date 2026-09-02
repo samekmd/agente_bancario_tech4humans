@@ -21,6 +21,10 @@ class AtendimentoState(TypedDict):
     # Autenticação
     autenticado: bool
     tentativas_auth: int
+    # Índice do turno em que a última tentativa foi contabilizada. O limite do CLAUDE.md é
+    # de tentativas do cliente, e o agente pode chamar a tool duas vezes no mesmo turno —
+    # sem este campo, uma única mensagem gastaria duas das três chances dele.
+    turno_ultima_tentativa_auth: int | None
     cpf: str | None
     cliente: Cliente | None
 
@@ -49,6 +53,7 @@ def estado_inicial() -> AtendimentoState:
         agente_atual=Agente.TRIAGEM,
         autenticado=False,
         tentativas_auth=0,
+        turno_ultima_tentativa_auth=None,
         cpf=None,
         cliente=None,
         solicitacao_atual=None,

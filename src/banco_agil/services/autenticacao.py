@@ -28,6 +28,7 @@ def autenticar(
     cpf: str,
     data_nascimento: str,
     tentativas_atuais: int = 0,
+    ja_contabilizada: bool = False,
     max_tentativas: int | None = None,
     repo: ClientesRepository | None = None,
 ) -> ResultadoAutenticacao:
@@ -36,13 +37,18 @@ def autenticar(
     Toda tentativa malsucedida conta, inclusive a que traz o dado em formato inválido —
     o limite do CLAUDE.md é de tentativas totais, não de credenciais bem formadas.
     Uma autenticação bem-sucedida não incrementa o contador.
+
+    `ja_contabilizada` diz que o turno atual do cliente já gastou a sua tentativa. O
+    agente pode chamar a tool mais de uma vez na mesma invocação — recebe a falha e tenta
+    de novo por conta própria —, e sem essa marcação uma única mensagem consumiria duas
+    das três chances. O limite é de tentativas do cliente, não de chamadas de ferramenta.
     """
     if max_tentativas is None:
         from banco_agil.config import get_settings
 
         max_tentativas = get_settings().max_tentativas_auth
 
-    tentativas = tentativas_atuais + 1
+    tentativas = tentativas_atuais if ja_contabilizada else tentativas_atuais + 1
 
     try:
         cpf_normalizado = validar_cpf(cpf)

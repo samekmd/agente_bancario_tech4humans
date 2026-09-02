@@ -202,8 +202,14 @@ class TestAutenticarCliente:
     ) -> None:
         recebidos: dict[str, Any] = {}
 
-        def espiao(cpf: str, data: str, tentativas_atuais: int = 0) -> ResultadoAutenticacao:
+        def espiao(
+            cpf: str,
+            data: str,
+            tentativas_atuais: int = 0,
+            ja_contabilizada: bool = False,
+        ) -> ResultadoAutenticacao:
             recebidos["tentativas_atuais"] = tentativas_atuais
+            recebidos["ja_contabilizada"] = ja_contabilizada
             return ResultadoAutenticacao(autenticado=False, tentativas=3, tentativas_restantes=0)
 
         monkeypatch.setattr("banco_agil.tools.autenticacao.autenticar", espiao)
@@ -215,6 +221,116 @@ class TestAutenticarCliente:
         )
 
         assert recebidos["tentativas_atuais"] == 2
+        assert recebidos["ja_contabilizada"] is False
+
+
+class TestUmaTentativaPorTurnoNaTool:
+    """Duas chamadas na mesma mensagem do cliente gastam uma tentativa só.
+
+    Reproduz os logs de 02/09: o agente chamou `autenticar_cliente`, recebeu a falha e
+    chamou de novo 515 ms depois, na mesma invocação. O cliente perdeu duas das três
+    chances numa única mensagem.
+    """
+
+    def _espiao(self, recebidos: list[bool]):
+        def espiao(
+            cpf: str,
+            data: str,
+            tentativas_atuais: int = 0,
+            ja_contabilizada: bool = False,
+        ) -> ResultadoAutenticacao:
+            recebidos.append(ja_contabilizada)
+            tentativas = tentativas_atuais if ja_contabilizada else tentativas_atuais + 1
+            return ResultadoAutenticacao(
+                autenticado=False,
+                tentativas=tentativas,
+                tentativas_restantes=3 - tentativas,
+                bloqueado=tentativas >= 3,
+                motivo=MotivoFalhaAuth.CREDENCIAIS_INCORRETAS,
+            )
+
+        return espiao
+
+    def test_primeira_chamada_do_turno_cobra(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        vistos: list[bool] = []
+        monkeypatch.setattr("banco_agil.tools.autenticacao.autenticar", self._espiao(vistos))
+
+        comando = chamar(
+            autenticar_cliente,
+            cpf="390.533.447-05",
+            data_nascimento="01/01/1999",
+            state=estado(disse="meu cpf e 390.533.447-05"),
+        )
+
+        assert vistos == [False]
+        assert comando.update["tentativas_auth"] == 1
+        assert comando.update["turno_ultima_tentativa_auth"] == 1
+
+    def test_segunda_chamada_no_mesmo_turno_nao_cobra(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        vistos: list[bool] = []
+        monkeypatch.setattr("banco_agil.tools.autenticacao.autenticar", self._espiao(vistos))
+
+        # Estado como ficou depois da primeira chamada, ainda no mesmo turno.
+        comando = chamar(
+            autenticar_cliente,
+            cpf="390.533.447-05",
+            data_nascimento="01/01/1999",
+            state=estado(
+                disse="meu cpf e 390.533.447-05",
+                tentativas_auth=1,
+                turno_ultima_tentativa_auth=1,
+            ),
+        )
+
+        assert vistos == [True]
+        assert comando.update["tentativas_auth"] == 1
+        assert comando.update["encerrado"] is False
+
+    def test_turno_seguinte_volta_a_cobrar(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        vistos: list[bool] = []
+        monkeypatch.setattr("banco_agil.tools.autenticacao.autenticar", self._espiao(vistos))
+
+        base = estado(disse="primeira tentativa", tentativas_auth=1, turno_ultima_tentativa_auth=1)
+        base["messages"] = [*base["messages"], HumanMessage(content="segunda tentativa")]
+
+        comando = chamar(
+            autenticar_cliente,
+            cpf="390.533.447-05",
+            data_nascimento="01/01/1999",
+            state=base,
+        )
+
+        assert vistos == [False]
+        assert comando.update["tentativas_auth"] == 2
+        assert comando.update["turno_ultima_tentativa_auth"] == 2
+
+    def test_tres_mensagens_bloqueiam_mesmo_com_chamadas_repetidas(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """O bloqueio continua chegando na terceira mensagem, nem antes nem depois."""
+        vistos: list[bool] = []
+        monkeypatch.setattr("banco_agil.tools.autenticacao.autenticar", self._espiao(vistos))
+
+        atual = estado(disse="tentativa 1")
+        for numero in range(1, 4):
+            if numero > 1:
+                atual["messages"] = [
+                    *atual["messages"],
+                    HumanMessage(content=f"tentativa {numero}"),
+                ]
+            for _ in range(2):  # o agente insiste duas vezes por mensagem
+                comando = chamar(
+                    autenticar_cliente,
+                    cpf="390.533.447-05",
+                    data_nascimento="01/01/1999",
+                    state=atual,
+                )
+                atual = {**atual, **{k: v for k, v in comando.update.items() if k != "messages"}}
+
+        assert atual["tentativas_auth"] == 3
+        assert comando.update["encerrado"] is True
 
 
 class TestCredito:
@@ -335,6 +451,36 @@ class TestCredito:
         )
 
         assert comando.update["limite_pendente_reavaliacao"] is None
+
+    def test_pedido_menor_que_o_limite_atual_pede_novo_valor(self) -> None:
+        """Helena tem R$ 2.500 e pede R$ 100: não é aumento, e o agente precisa perguntar.
+
+        Sem `precisa_perguntar`, o modelo trata a recusa como erro técnico e desiste em vez
+        de voltar ao cliente.
+        """
+        payload = payload_de(
+            chamar(
+                solicitar_aumento_limite,
+                novo_limite="100",
+                state=estado("quero 100", cliente=CLIENTE),
+            )
+        )
+
+        assert payload["ok"] is False
+        assert payload["precisa_perguntar"] is True
+        assert "2500.00" in payload["erro"]
+
+    def test_pedido_igual_ao_limite_atual_pede_novo_valor(self) -> None:
+        payload = payload_de(
+            chamar(
+                solicitar_aumento_limite,
+                novo_limite="2500",
+                state=estado("quero 2500", cliente=CLIENTE),
+            )
+        )
+
+        assert payload["ok"] is False
+        assert payload["precisa_perguntar"] is True
 
     def test_valor_ilegivel_nao_chega_ao_service(self, monkeypatch: pytest.MonkeyPatch) -> None:
         def nao_deveria(*a: Any, **k: Any) -> None:

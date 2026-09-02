@@ -14,7 +14,7 @@ from banco_agil.services.limite import (
 )
 from banco_agil.state import AtendimentoState, falas_do_cliente
 from banco_agil.tools.base import falha, falha_de, responder, sucesso
-from banco_agil.utils.exceptions import ValorNaoInformadoError
+from banco_agil.utils.exceptions import AumentoInvalidoError, ValorNaoInformadoError
 from banco_agil.utils.logging import dump_seguro, get_logger, mascarar_cpf
 from banco_agil.utils.validators import validar_valor_monetario
 
@@ -68,9 +68,10 @@ def solicitar_aumento_limite(
     """Registra e avalia um pedido de aumento de limite para o cliente autenticado.
 
     Use quando o cliente disser quanto quer de limite. O valor pode vir como "8000" ou
-    "R$ 8.000,00". O pedido é sempre registrado antes da decisão. Retorna se foi aprovado
-    ou rejeitado e qual o limite máximo permitido pelo score atual. Se for rejeitado,
-    ofereça a entrevista de crédito ao cliente.
+    "R$ 8.000,00", e precisa ser maior que o limite atual dele — um valor igual ou menor
+    não é aumento e será recusado. O pedido é sempre registrado antes da decisão. Retorna
+    se foi aprovado ou rejeitado e qual o limite máximo permitido pelo score atual. Se for
+    rejeitado, ofereça a entrevista de crédito ao cliente.
     """
     cliente = state.get("cliente")
     logger.info(
@@ -93,7 +94,9 @@ def solicitar_aumento_limite(
             state.get("limite_pendente_reavaliacao"),
         )
         pedido, avaliacao = processar_pedido_aumento(cliente, valor)
-    except ValorNaoInformadoError as erro:
+    except (ValorNaoInformadoError, AumentoInvalidoError) as erro:
+        # Não é erro de sistema: falta um valor utilizável. O agente precisa voltar ao
+        # cliente e perguntar, em vez de escolher um número por conta própria.
         payload = falha_de(erro, "solicitar_aumento_limite")
         payload["precisa_perguntar"] = True
         return responder(payload, tool_call_id)

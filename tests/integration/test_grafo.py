@@ -88,6 +88,52 @@ class TestAutenticacao:
         assert estado["tentativas_auth"] == 1
         assert estado["encerrado"] is False
 
+    def test_duas_chamadas_na_mesma_mensagem_gastam_uma_tentativa(self) -> None:
+        """Regressão dos logs de 02/09: o agente insistiu sozinho e queimou duas chances.
+
+        Entre as duas chamadas passaram 515 ms — o laço do agente rodou de novo dentro da
+        mesma invocação. O limite é de tentativas do cliente, não de chamadas da tool.
+        """
+        errado = {"cpf": CPF, "data_nascimento": "01/01/1999"}
+        grafo = build_graph(
+            llm=roteiro(
+                chama("autenticar_cliente", errado, "c1"),
+                chama("autenticar_cliente", errado, "c2"),
+                fala("Os dados não conferem. Pode conferir e me dizer de novo?"),
+            )
+        )
+
+        estado = conversar(grafo, "meus dados")
+
+        assert estado["tentativas_auth"] == 1
+        assert estado["encerrado"] is False
+        assert orfas(estado) == []
+
+    def test_bloqueio_chega_na_terceira_mensagem_mesmo_com_insistencia(self) -> None:
+        """Três mensagens bloqueiam, ainda que o agente chame a tool duas vezes em cada."""
+        errado = {"cpf": CPF, "data_nascimento": "01/01/1999"}
+        grafo = build_graph(
+            llm=roteiro(
+                chama("autenticar_cliente", errado, "c1a"),
+                chama("autenticar_cliente", errado, "c1b"),
+                fala("Não confere. Restam 2 tentativas."),
+                chama("autenticar_cliente", errado, "c2a"),
+                chama("autenticar_cliente", errado, "c2b"),
+                fala("Ainda não confere. Resta 1 tentativa."),
+                chama("autenticar_cliente", errado, "c3a"),
+                fala("Não consegui confirmar sua identidade."),
+            )
+        )
+
+        for numero in range(3):
+            estado = conversar(grafo, "meus dados", primeira=numero == 0)
+            if numero < 2:
+                assert estado["encerrado"] is False, f"bloqueou cedo, na mensagem {numero + 1}"
+
+        assert estado["tentativas_auth"] == 3
+        assert estado["encerrado"] is True
+        assert orfas(estado) == []
+
 
 class TestHandoff:
     def test_credito_responde_na_mesma_invocacao(self) -> None:

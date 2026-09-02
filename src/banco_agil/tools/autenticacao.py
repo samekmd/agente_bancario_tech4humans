@@ -8,7 +8,7 @@ from langgraph.types import Command
 
 from banco_agil.observability.tags import marcar, marcar_cliente
 from banco_agil.services.autenticacao import autenticar
-from banco_agil.state import AtendimentoState
+from banco_agil.state import AtendimentoState, falas_do_cliente
 from banco_agil.tools.base import falha, falha_de, responder, sucesso
 from banco_agil.utils.logging import get_logger, mascarar_cpf
 
@@ -31,14 +31,32 @@ def autenticar_cliente(
     cordialidade.
     """
     tentativas_antes = state.get("tentativas_auth", 0)
+    # Cada invocação do grafo acrescenta exatamente uma fala do cliente, então a contagem
+    # delas identifica o turno. Não é o contador de tentativas — esse vive em
+    # `tentativas_auth`; aqui só se pergunta se este turno já foi cobrado.
+    turno = len(falas_do_cliente(state))
+    ja_contabilizada = state.get("turno_ultima_tentativa_auth") == turno
+
     # A data de nascimento nunca entra no log: junto com o CPF ela é a credencial.
     logger.info(
-        "-> autenticar_cliente(cpf=%s) | tentativas antes=%d",
+        "-> autenticar_cliente(cpf=%s) | tentativas antes=%d, turno=%d, ja contabilizada=%s",
         mascarar_cpf(cpf),
         tentativas_antes,
+        turno,
+        ja_contabilizada,
     )
+    if ja_contabilizada:
+        logger.warning(
+            "segunda chamada de autenticar_cliente no turno %d; não gasta nova tentativa",
+            turno,
+        )
     try:
-        resultado = autenticar(cpf, data_nascimento, tentativas_atuais=tentativas_antes)
+        resultado = autenticar(
+            cpf,
+            data_nascimento,
+            tentativas_atuais=tentativas_antes,
+            ja_contabilizada=ja_contabilizada,
+        )
     except Exception as erro:  # noqa: BLE001 - nenhuma tool levanta exceção para o grafo
         return responder(falha_de(erro, "autenticar_cliente"), tool_call_id)
 
@@ -61,6 +79,7 @@ def autenticar_cliente(
             payload,
             tool_call_id,
             tentativas_auth=resultado.tentativas,
+            turno_ultima_tentativa_auth=turno,
             encerrado=resultado.bloqueado,
         )
 
@@ -80,4 +99,5 @@ def autenticar_cliente(
         cpf=cliente.cpf,
         cliente=cliente,
         tentativas_auth=resultado.tentativas,
+        turno_ultima_tentativa_auth=turno,
     )

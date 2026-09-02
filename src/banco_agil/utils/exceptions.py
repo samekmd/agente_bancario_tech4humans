@@ -34,6 +34,15 @@ class ValorNaoInformadoError(BancoAgilError):
     """
 
 
+class AumentoInvalidoError(BancoAgilError):
+    """O valor pedido não é maior que o limite atual do cliente.
+
+    Não é entrada inválida nem valor inventado: é um pedido bem formado que simplesmente
+    não é um aumento. Pedir menos — ou o mesmo — que o limite em vigor não é uma
+    solicitação de aumento, e não pode ser registrada como uma.
+    """
+
+
 class DadosIndisponiveisError(BancoAgilError):
     """Uma base necessária não pôde ser lida (arquivo ausente ou corrompido)."""
 

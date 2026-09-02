@@ -1,6 +1,7 @@
 """Testes da UI Streamlit, exercitando o script da página com `AppTest`."""
 
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -280,3 +281,78 @@ class TestNadaTecnicoChegaAoCliente:
 
         assert "bloqueada antes de chegar ao cliente" in caplog.text
         assert "tool_use_failed" in caplog.text
+
+
+class TestBloqueioPorAutenticacao:
+    """O bloqueio precisa sobreviver ao botão que a própria tela oferece.
+
+    Nos logs de 02/09 o cliente foi bloqueado às 13:56:05 e voltou a tentar às 13:57:07
+    com `tentativas antes=0`. O caminho era "Novo atendimento": thread nova, contador
+    zerado. A única ação oferecida a quem foi bloqueado desfazia o bloqueio.
+    """
+
+    ERRADO = {"cpf": CPF, "data_nascimento": "01/01/1999"}
+
+    def _bloquear(self, pagina: Any) -> Any:
+        at = pagina(
+            chama("autenticar_cliente", self.ERRADO, "c1"),
+            fala("Não confere. Restam 2 tentativas."),
+            chama("autenticar_cliente", self.ERRADO, "c2"),
+            fala("Ainda não confere. Resta 1 tentativa."),
+            chama("autenticar_cliente", self.ERRADO, "c3"),
+            fala("Não consegui confirmar sua identidade."),
+        )
+        for _ in range(3):
+            responder(at, "meus dados")
+        return at
+
+    def test_tres_mensagens_bloqueiam_a_sessao(self, pagina: Any) -> None:
+        at = self._bloquear(pagina)
+
+        assert at.session_state["bloqueado_auth"] is True
+        assert at.exception == []
+
+    def test_a_tela_de_bloqueio_nao_oferece_reiniciar(self, pagina: Any) -> None:
+        at = self._bloquear(pagina)
+
+        rotulos = [botao.label for botao in at.button]
+        assert "Novo atendimento" not in rotulos
+        assert "Iniciar novo atendimento" not in rotulos
+
+    def test_a_tela_de_bloqueio_nao_aceita_mais_mensagens(self, pagina: Any) -> None:
+        at = self._bloquear(pagina)
+
+        assert at.chat_input == []
+
+    def test_reiniciar_sessao_nao_apaga_o_bloqueio(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """A garantia central: `bloqueado_auth` é a única chave que sobrevive ao reinício.
+
+        Testada direto na função, e não pela tela, porque a tela deixou de oferecer o botão
+        — mas a garantia precisa valer para qualquer caminho que chame `reiniciar_sessao`.
+        """
+        estado = SimpleNamespace(
+            thread_id="thread-antiga",
+            historico=[("user", "oi")],
+            encerrado=True,
+            primeiro_turno=False,
+            bloqueado_auth=True,
+        )
+        monkeypatch.setattr(sessao.st, "session_state", estado)
+
+        sessao.reiniciar_sessao()
+
+        assert estado.bloqueado_auth is True
+        assert estado.thread_id != "thread-antiga"
+        assert estado.historico == []
+        assert estado.encerrado is False
+        assert estado.primeiro_turno is True
+
+    def test_sessao_normal_nao_marca_bloqueio(self, pagina: Any) -> None:
+        at = pagina(
+            chama("autenticar_cliente", {"cpf": CPF, "data_nascimento": NASCIMENTO}),
+            fala("Olá, Beatriz!"),
+        )
+        responder(at, f"meu cpf é {CPF}, nasci em {NASCIMENTO}")
+
+        assert at.session_state["bloqueado_auth"] is False
+        assert len(at.chat_input) == 1

@@ -12,7 +12,11 @@ from banco_agil.domain.models import Cliente, FaixaLimite, ResultadoAvaliacao, S
 from banco_agil.observability.tracing import TASK, span
 from banco_agil.repositories.score_limite import ScoreLimiteRepository
 from banco_agil.repositories.solicitacoes import SolicitacoesRepository
-from banco_agil.utils.exceptions import DadosIndisponiveisError, ValorNaoInformadoError
+from banco_agil.utils.exceptions import (
+    AumentoInvalidoError,
+    DadosIndisponiveisError,
+    ValorNaoInformadoError,
+)
 from banco_agil.utils.logging import dump_seguro, get_logger, mascarar_cpf
 from banco_agil.utils.validators import validar_valor_monetario
 
@@ -109,6 +113,31 @@ def _avaliar(
     return resultado
 
 
+def conferir_aumento_real(novo_limite: float, limite_atual: float) -> None:
+    """Garante que o valor pedido é de fato maior que o limite em vigor.
+
+    A avaliação compara o valor com o teto da faixa de score, e nunca com o limite que o
+    cliente já tem — sem esta guarda, um pedido de R$ 100 para quem tem R$ 5.000 passava
+    por "aprovado" e entrava no CSV de solicitações como aumento. Pedir o mesmo valor que
+    já se tem também não é aumento, por isso a comparação é estrita.
+
+    Levanta `AumentoInvalidoError`, que o agente verbaliza como um pedido de esclarecimento.
+    """
+    if novo_limite > limite_atual:
+        return
+
+    logger.warning(
+        "pedido de R$ %.2f não é aumento sobre o limite atual de R$ %.2f",
+        novo_limite,
+        limite_atual,
+    )
+    raise AumentoInvalidoError(
+        f"O cliente já tem R$ {limite_atual:.2f} de limite, e pediu R$ {novo_limite:.2f}. "
+        "Um aumento precisa ser maior que o limite atual — pergunte para qual valor ele "
+        "quer aumentar."
+    )
+
+
 def valor_para_nova_tentativa(solicitacao: SolicitacaoAumento | None) -> float | None:
     """Valor que vale a pena reoferecer ao cliente depois da entrevista.
 
@@ -135,6 +164,10 @@ def processar_pedido_aumento(
     A ordem é a do CLAUDE.md: o pedido é gravado antes da decisão, para que fique
     registrado mesmo que a avaliação falhe. Devolve a solicitação já com o status final
     e a avaliação que o produziu.
+
+    A validação de entrada vem antes do registro, e não contradiz essa ordem: "gravar
+    antes de decidir" vale para a *decisão* de aprovar ou rejeitar. Um valor que não é
+    aumento não chega a ser um pedido válido, e não deve sujar o CSV de solicitações.
     """
     repo_pedidos = repo_solicitacoes or SolicitacoesRepository()
     momento = agora or datetime.now()
@@ -145,6 +178,8 @@ def processar_pedido_aumento(
         novo_limite,
         cliente.score_atual,
     )
+
+    conferir_aumento_real(novo_limite, cliente.limite_atual)
 
     solicitacao = SolicitacaoAumento(
         cpf_cliente=cliente.cpf,

@@ -104,6 +104,7 @@ modelagem provavelmente está errada.
 | `agente_atual` | `Agente` (enum) | handoff tools |
 | `autenticado` | `bool` | tool de autenticação |
 | `tentativas_auth` | `int` | tool de autenticação |
+| `turno_ultima_tentativa_auth` | `int \| None` | tool de autenticação |
 | `cpf` | `str \| None` | tool de autenticação |
 | `cliente` | `Cliente \| None` | tool de autenticação |
 | `solicitacao_atual` | `SolicitacaoAumento \| None` | tools de crédito |
@@ -127,6 +128,20 @@ vindo de `st.session_state`. Não usar `interrupt()` para coletar input.
 - **Autenticação**: CPF + data de nascimento contra `clientes.csv`. Até 3 tentativas
   totais. Na terceira falha, mensagem cordial e encerramento. O contador vive no estado,
   não na contagem de mensagens.
+- **Uma tentativa de autenticação por mensagem do cliente.** O agente pode chamar
+  `autenticar_cliente` mais de uma vez na mesma invocação — recebe a falha e tenta de novo
+  sozinho. Sem guarda, uma única mensagem gasta duas das três chances. O limite é de
+  tentativas do cliente, não de chamadas de ferramenta:
+  `turno_ultima_tentativa_auth` guarda o turno já cobrado, e a segunda chamada não
+  incrementa. Isso não contradiz a regra acima — quem conta é `tentativas_auth`, no estado;
+  a contagem de falas serve só como **identidade do turno**, nunca como contador.
+- **O bloqueio por tentativas esgotadas sobrevive ao reinício da sessão.** `bloqueado_auth`
+  é a única chave que `reiniciar_sessao()` não limpa, e a tela de bloqueio não oferece o
+  botão de recomeçar. Vale pela sessão do navegador; bloqueio persistente exigiria estado
+  no servidor, fora do escopo.
+- **Aumento tem que aumentar**: `novo_limite` precisa ser estritamente maior que
+  `limite_atual`. A validação acontece antes do registro — um valor que não é aumento não
+  é pedido válido e não entra no CSV.
 - **Nenhum agente além da Triagem atua sem `autenticado is True`.** Verificado na aresta,
   não no prompt.
 - **Aumento de limite**: registrar o pedido em `solicitacoes_aumento_limite.csv` com

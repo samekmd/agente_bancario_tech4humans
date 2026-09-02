@@ -94,3 +94,73 @@ class TestContagemDeTentativas:
         )
 
         assert resultado.bloqueado is True
+
+
+class TestUmaTentativaPorTurno:
+    """O limite é de tentativas do cliente, não de chamadas da ferramenta.
+
+    Nos logs de 02/09 o agente chamou `autenticar_cliente` duas vezes na mesma invocação,
+    com 515 ms entre elas: uma única mensagem do cliente consumiu duas das três chances
+    dele. `ja_contabilizada` é o que impede a segunda chamada de cobrar de novo.
+    """
+
+    def test_segunda_chamada_no_mesmo_turno_nao_incrementa(
+        self, repo_clientes: ClientesRepository
+    ) -> None:
+        primeira = autenticar(CPF, "01/01/1990", tentativas_atuais=0, repo=repo_clientes)
+        segunda = autenticar(
+            CPF,
+            "02/02/1991",
+            tentativas_atuais=primeira.tentativas,
+            ja_contabilizada=True,
+            repo=repo_clientes,
+        )
+
+        assert primeira.tentativas == 1
+        assert segunda.tentativas == 1
+        assert segunda.tentativas_restantes == 2
+        assert segunda.bloqueado is False
+
+    def test_o_bloqueio_ainda_acontece_na_terceira_mensagem(
+        self, repo_clientes: ClientesRepository
+    ) -> None:
+        """Três mensagens do cliente bloqueiam, mesmo com chamadas repetidas em cada uma."""
+        tentativas = 0
+        for _ in range(3):
+            # Primeira chamada do turno: cobra.
+            resultado = autenticar(
+                CPF, "01/01/1990", tentativas_atuais=tentativas, repo=repo_clientes
+            )
+            # O agente insiste no mesmo turno: não cobra.
+            resultado = autenticar(
+                CPF,
+                "01/01/1990",
+                tentativas_atuais=resultado.tentativas,
+                ja_contabilizada=True,
+                repo=repo_clientes,
+            )
+            tentativas = resultado.tentativas
+
+        assert tentativas == 3
+        assert resultado.bloqueado is True
+
+    def test_turno_ja_cobrado_no_limite_continua_bloqueado(
+        self, repo_clientes: ClientesRepository
+    ) -> None:
+        """Não contar de novo não pode desfazer um bloqueio já atingido."""
+        resultado = autenticar(
+            CPF, "01/01/1990", tentativas_atuais=3, ja_contabilizada=True, repo=repo_clientes
+        )
+
+        assert resultado.tentativas == 3
+        assert resultado.tentativas_restantes == 0
+        assert resultado.bloqueado is True
+
+    def test_sucesso_no_turno_ja_cobrado_autentica(self, repo_clientes: ClientesRepository) -> None:
+        """Errar e acertar na mesma mensagem ainda autentica."""
+        resultado = autenticar(
+            CPF, NASCIMENTO, tentativas_atuais=1, ja_contabilizada=True, repo=repo_clientes
+        )
+
+        assert resultado.autenticado is True
+        assert resultado.tentativas == 1

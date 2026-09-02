@@ -188,9 +188,9 @@ o registro do CPF autenticado, nunca a base inteira.
 
 | Funcionalidade | Comportamento |
 |---|---|
-| **Autenticação** | CPF e data de nascimento conferidos contra a base, com limite de três tentativas por sessão e encerramento cordial na terceira falha. O contador vive no estado do grafo, não na contagem de mensagens |
+| **Autenticação** | CPF e data de nascimento conferidos contra a base, com limite de três tentativas por sessão e encerramento cordial na terceira falha. O contador vive no estado do grafo, e cada mensagem do cliente vale no máximo uma tentativa, mesmo que o agente chame a ferramenta duas vezes |
 | **Consulta de limite** | Limite em vigor, score atual e teto autorizado pela faixa do score |
-| **Pedido de aumento** | Registra a solicitação, avalia contra a faixa e atualiza a linha com o desfecho. A aprovação registra a decisão do pedido e não altera o limite em vigor — o agente é explícito quanto a isso |
+| **Pedido de aumento** | Registra a solicitação, avalia contra a faixa e atualiza a linha com o desfecho. O valor precisa ser maior que o limite em vigor, e a aprovação registra a decisão do pedido sem alterar esse limite — o agente é explícito quanto a isso |
 | **Entrevista de crédito** | Cinco perguntas em ordem fixa, sem pular nenhuma, com recálculo e persistência do novo score |
 | **Nova tentativa pós-entrevista** | Se o valor rejeitado passa a caber no score novo, o mesmo valor é reoferecido ao cliente, uma única vez |
 | **Câmbio** | Cotação USD-BRL em tempo real e conversão de valores. Se a fonte estiver indisponível, o agente informa com clareza em vez de estimar |

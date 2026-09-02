@@ -4,6 +4,7 @@ import streamlit as st
 from pydantic import ValidationError
 
 from ui.session import (
+    bloqueado_por_autenticacao,
     enviar_mensagem,
     iniciar_sessao,
     observabilidade_ativa,
@@ -16,6 +17,11 @@ SUBTITULO = "Atendimento virtual"
 SAUDACAO = "Olá! Sou o assistente do Banco Ágil. Como posso ajudar você hoje?"
 PLACEHOLDER = "Digite sua mensagem..."
 AVISO_ENCERRADO = "Este atendimento foi encerrado."
+AVISO_BLOQUEADO = (
+    "Não foi possível confirmar a identidade do cliente após as tentativas permitidas. "
+    "Por segurança, este atendimento está encerrado. Procure uma agência ou a central "
+    "telefônica para seguir."
+)
 TRACING_ATIVO = "Observabilidade: gravando no MLflow."
 TRACING_DESLIGADO = "Observabilidade: desligada. Rode `make mlflow` para gravar os traces."
 
@@ -45,7 +51,11 @@ def _barra_lateral() -> None:
     with st.sidebar:
         st.subheader(TITULO)
         st.caption(SUBTITULO)
-        if st.button("Novo atendimento", use_container_width=True):
+        # Bloqueado por autenticação, reiniciar é justamente o que não pode ser oferecido:
+        # thread nova devolveria as três tentativas.
+        if not bloqueado_por_autenticacao() and st.button(
+            "Novo atendimento", use_container_width=True
+        ):
             reiniciar_sessao()
             st.rerun()
         st.divider()
@@ -74,6 +84,10 @@ def renderizar() -> None:
     st.caption(SUBTITULO)
     _barra_lateral()
     _historico()
+
+    if bloqueado_por_autenticacao():
+        st.error(AVISO_BLOQUEADO)
+        return
 
     if st.session_state.encerrado:
         st.info(AVISO_ENCERRADO)
