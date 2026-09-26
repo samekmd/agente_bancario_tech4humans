@@ -32,7 +32,7 @@ class Settings(BaseSettings):
     temperatura_extracao: float = 0.0
     # Teto de geração por resposta. Folgado para qualquer resposta legítima somada ao
     # raciocínio interno, curto o bastante para interromper repetição degenerada.
-    max_tokens_resposta: int = 1024
+    max_tokens_resposta: int = 512
     # A família gpt-oss às vezes emite o cabeçalho harmony da tool call fora de ordem
     # e o Groq devolve 400 `tool_use_failed`. É estocástico: repetir resolve.
     llm_max_tentativas_formato: int = 2

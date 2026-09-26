@@ -18,7 +18,7 @@ from banco_agil.utils.logging import get_logger
 logger = get_logger("llm")
 
 
-def criar_llm(modelo: str | None = None, temperatura: float | None = None) -> BaseChatModel:
+def criar_llm(modelo: str | None = None, temperatura: float | None = None, reasoning_effort:str | None = None) -> BaseChatModel:
     """Instancia o modelo do Groq com o modelo e a temperatura informados.
 
     `reasoning_format="hidden"` é essencial: sem isso, modelos de raciocínio (a família
@@ -33,6 +33,7 @@ def criar_llm(modelo: str | None = None, temperatura: float | None = None) -> Ba
         model=modelo or settings.modelo_barato,
         temperature=settings.temperatura_dialogo if temperatura is None else temperatura,
         api_key=settings.groq_api_key.get_secret_value(),
+        reasoning_effort=reasoning_effort,
         reasoning_format="hidden",
         max_tokens=settings.max_tokens_resposta,
     )
@@ -41,19 +42,19 @@ def criar_llm(modelo: str | None = None, temperatura: float | None = None) -> Ba
 def llm_dialogo() -> BaseChatModel:
     """Conversa com o cliente no modelo barato: temperatura baixa, mas não zero."""
     settings = get_settings()
-    return criar_llm(settings.modelo_barato, settings.temperatura_dialogo)
+    return criar_llm(settings.modelo_barato, settings.temperatura_dialogo, reasoning_effort="low")
 
 
 def llm_dialogo_robusto() -> BaseChatModel:
     """Conversa com o cliente no modelo robusto, mantendo a temperatura de diálogo."""
     settings = get_settings()
-    return criar_llm(settings.modelo_robusto, settings.temperatura_dialogo)
+    return criar_llm(settings.modelo_robusto, settings.temperatura_dialogo, reasoning_effort="none")
 
 
 def llm_extracao() -> BaseChatModel:
     """Extração e classificação: modelo robusto a temperatura zero."""
     settings = get_settings()
-    return criar_llm(settings.modelo_robusto, settings.temperatura_extracao)
+    return criar_llm(settings.modelo_robusto, settings.temperatura_extracao, reasoning_effort="none")
 
 
 class PerfilLLM(StrEnum):
